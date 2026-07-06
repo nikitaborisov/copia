@@ -6,9 +6,9 @@
 <title>Copia — an abundance of words</title>
 <style>
   :root{
-    --bg:#1a1a2e; --panel:#24243c; --panel2:#2d2d4a; --tile:#3b3b5e; --tile-edge:#4d4d78;
-    --tile-sel:#8b5cf6; --tile-path:#6d28d9; --text:#eaeaf2; --dim:#9a9ab8;
-    --accent:#a78bfa; --good:#34d399; --bonus:#fbbf24; --bad:#f87171;
+    --bg:#1c090c; --panel:#2b1014; --panel2:#3a151b; --tile:#4c1a22; --tile-edge:#702634;
+    --tile-sel:#c22b3d; --tile-path:#8f1f2e; --text:#f6e8e6; --dim:#c49a97;
+    --accent:#ff7a85; --good:#8fce8f; --bonus:#e8b84b; --bad:#ffb26b;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
@@ -38,7 +38,7 @@
     cursor:pointer; transition:background .08s,transform .08s;}
   .tile.sel{background:var(--tile-sel); border-color:var(--accent); transform:scale(1.06);}
   .tile.hint{background:var(--tile-path); border-color:var(--accent);}
-  #genOverlay{position:absolute; inset:0; background:rgba(26,26,46,.88); border-radius:12px;
+  #genOverlay{position:absolute; inset:0; background:rgba(28,9,12,.88); border-radius:12px;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
     font-size:15px; color:var(--dim); z-index:5;}
   #genOverlay .big{font-size:18px; color:var(--text); font-weight:600;}
@@ -62,7 +62,7 @@
   #bonusSection h3{font-size:14px; margin:0 0 6px; color:var(--bonus);}
   #revealBtn{margin-top:14px; width:100%;}
   #winBanner{display:none; margin-top:12px; padding:12px; border-radius:10px; text-align:center;
-    background:linear-gradient(90deg,#065f46,#047857); font-weight:700; font-size:16px;}
+    background:linear-gradient(90deg,#7a4e0e,#a9741a); font-weight:700; font-size:16px;}
   @media (max-width:720px){ #wordsCol{max-width:none;} }
 </style>
 </head>
@@ -62969,7 +62969,7 @@ function drawPath(indices){
   let html='';
   for(let k=1;k<indices.length;k++){
     const [x1,y1]=tileCenter(indices[k-1]), [x2,y2]=tileCenter(indices[k]);
-    html+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(167,139,250,.55)" stroke-width="6" stroke-linecap="round"/>`;
+    html+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,138,146,.55)" stroke-width="6" stroke-linecap="round"/>`;
   }
   linesSvg.innerHTML=html;
 }
