@@ -19,9 +19,13 @@
   h1{font-size:22px; margin:0; letter-spacing:1px;}
   h1 .inf{color:var(--accent);}
   .spacer{flex:1;}
-  select,button{background:var(--panel2); color:var(--text); border:1px solid var(--tile-edge);
+  select,button,input[type=text]{background:var(--panel2); color:var(--text); border:1px solid var(--tile-edge);
     border-radius:8px; padding:8px 14px; font-size:14px; cursor:pointer; font-family:inherit;}
-  button:hover,select:hover{border-color:var(--accent);}
+  input[type=text]{cursor:text;}
+  input[type=text]::placeholder{color:var(--dim); opacity:.7;}
+  button:hover,select:hover,input[type=text]:focus{border-color:var(--accent);}
+  #boardName{flex:1; min-width:0;}
+  #loadRow{display:flex; gap:8px; width:100%; max-width:360px;}
   button.primary{background:var(--tile-sel); border-color:var(--tile-sel); font-weight:600;}
   main{display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; justify-content:center;}
   /* ---- board column ---- */
@@ -93,6 +97,10 @@
         </div>
       </div>
       <div id="boardStats"></div>
+      <div id="loadRow">
+        <input type="text" id="boardName" placeholder="e.g. curious elephant" autocomplete="off">
+        <button id="loadBtn">Load board</button>
+      </div>
       <div class="kbdhint">Drag across tiles or just type a word and press Enter. Backspace deletes, Esc clears.</div>
     </div>
     <div id="wordsCol">
@@ -62806,6 +62814,25 @@ function scoreOf(found){
   return s;
 }
 
+/* ---- seeded RNG & board names ---- */
+function hashStr(s){
+  let h=2166136261>>>0;
+  for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); }
+  return h>>>0;
+}
+function mulberry32(a){
+  return function(){
+    a|=0; a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+const NAME_ADJ=['amber','bold','brave','bright','calm','clever','cosmic','cozy','crimson','curious','dapper','daring','dizzy','dusty','eager','electric','elegant','fabled','fancy','fierce','fluffy','frosty','gentle','giddy','gilded','golden','grand','happy','hasty','hidden','humble','jolly','keen','kind','lively','loud','lucky','lunar','mellow','merry','mighty','misty','nimble','noble','plucky','polite','proud','quick','quiet','regal','rusty','sassy','scarlet','shiny','silent','silly','sleepy','snappy','solar','spry','stormy','sunny','swift','tidy','tiny','velvet','vivid','wandering','wild','witty','zesty'];
+const NAME_NOUN=['badger','bear','beaver','bison','bobcat','camel','cheetah','condor','coyote','crane','crow','dingo','dolphin','donkey','dragon','eagle','elephant','falcon','ferret','finch','fox','gecko','gibbon','giraffe','goose','hawk','hedgehog','heron','hippo','ibis','iguana','jackal','jaguar','koala','lemur','leopard','lion','llama','lobster','lynx','magpie','marmot','meerkat','moose','narwhal','newt','ocelot','octopus','orca','osprey','otter','owl','panda','panther','parrot','pelican','penguin','puffin','quokka','rabbit','raccoon','raven','salmon','seal','sparrow','stork','swan','tapir','tiger','toucan','turtle','viper','walrus','weasel','wolf','wombat','yak','zebra'];
+const randomName = ()=> NAME_ADJ[Math.random()*NAME_ADJ.length|0]+' '+NAME_NOUN[Math.random()*NAME_NOUN.length|0];
+const normalizeName = s=>String(s).trim().toLowerCase().replace(/[-_]+/g,' ').replace(/\s+/g,' ');
+
 // letter weights from common dictionary
 const LETTER_POOL = (()=>{
   const freq = {};
@@ -62817,7 +62844,7 @@ const LETTER_POOL = (()=>{
   }
   return pool;
 })();
-const randLetter = ()=>LETTER_POOL[Math.random()*LETTER_POOL.length|0];
+const randLetter = rng=>LETTER_POOL[rng()*LETTER_POOL.length|0];
 
 /* ================= solver ================= */
 function neighborsTable(n){
@@ -62870,13 +62897,13 @@ function findPath(board, nbr, word){
 }
 
 /* ================= board generator (hill climbing) ================= */
-function seedBoard(n){
-  const board = Array.from({length:n*n}, randLetter);
+function seedBoard(n, rng){
+  const board = Array.from({length:n*n}, ()=>randLetter(rng));
   // lay a long common word along a random self-avoiding path
   const maxLen = Math.min(12, n*n);
   const cands = COMMON.filter(w=>w.length>=Math.min(8,maxLen-1) && w.length<=maxLen);
   if(cands.length){
-    const w = cands[Math.random()*cands.length|0];
+    const w = cands[rng()*cands.length|0];
     const nbr = neighborsTable(n);
     const used = new Uint8Array(n*n);
     const path = [];
@@ -62884,31 +62911,37 @@ function seedBoard(n){
       used[i]=1; path.push(i);
       if(k===w.length-1) return true;
       const opts = nbr[i].filter(j=>!used[j]);
-      for(let t=opts.length-1;t>0;t--){const s=Math.random()*(t+1)|0;[opts[t],opts[s]]=[opts[s],opts[t]];}
+      for(let t=opts.length-1;t>0;t--){const s=rng()*(t+1)|0;[opts[t],opts[s]]=[opts[s],opts[t]];}
       for(const j of opts) if(walk(j,k+1)) return true;
       used[i]=0; path.pop(); return false;
     }
-    if(walk(Math.random()*n*n|0, 0)) path.forEach((i,k)=>board[i]=w[k]);
+    if(walk(rng()*n*n|0, 0)) path.forEach((i,k)=>board[i]=w[k]);
   }
   return board;
 }
 
-function generateBoard(n, onProgress, onDone){
+/* Deterministic generation: the board name seeds a PRNG and the hill climb runs
+   a FIXED number of iterations, so "4x4 curious elephant" is the same board on
+   every device. Do not change GEN_ITERS or the mutation logic without accepting
+   that all existing board names will reshuffle. */
+const GEN_ITERS = {3:5200, 4:3600, 5:1500};
+function generateBoard(n, name, onProgress, onDone){
+  const rng = mulberry32(hashStr(n+'x'+n+':'+normalizeName(name)));
   const nbr = neighborsTable(n);
-  let board = seedBoard(n);
+  let board = seedBoard(n, rng);
   let best = solve(board,nbr);
   let bestScore = scoreOf(best);
-  const deadline = performance.now() + (n===5 ? 2600 : 1800);
+  const total = GEN_ITERS[n];
   let iter = 0;
   function chunk(){
     const stop = performance.now()+40;
-    while(performance.now()<stop){
+    while(iter<total && performance.now()<stop){
       iter++;
       const trial = board.slice();
-      if(Math.random()<0.7){
-        trial[Math.random()*trial.length|0] = randLetter();
+      if(rng()<0.7){
+        trial[rng()*trial.length|0] = randLetter(rng);
       }else{
-        const a=Math.random()*trial.length|0, b=Math.random()*trial.length|0;
+        const a=rng()*trial.length|0, b=rng()*trial.length|0;
         [trial[a],trial[b]]=[trial[b],trial[a]];
       }
       const res = solve(trial,nbr);
@@ -62917,8 +62950,8 @@ function generateBoard(n, onProgress, onDone){
         board=trial; best=res; bestScore=sc;
       }
     }
-    onProgress(best.common.size, bestScore, iter);
-    if(performance.now()<deadline) setTimeout(chunk,0);
+    onProgress(best.common.size, bestScore, iter, total);
+    if(iter<total) setTimeout(chunk,0);
     else onDone(board,best,nbr);
   }
   chunk();
@@ -62931,7 +62964,7 @@ const grid=els('grid'), gridWrap=els('gridWrap'), overlay=els('genOverlay'),
       linesSvg=els('lines');
 
 const G = {
-  n:4, board:[], nbr:null,
+  n:4, name:'', board:[], nbr:null,
   required:new Set(), bonus:new Set(),
   foundReq:new Set(), foundBonus:new Set(),
   sel:[], typing:'', revealed:false, ready:false,
@@ -63089,8 +63122,10 @@ function renderWords(){
 }
 
 /* ---- new game ---- */
-function newGame(){
+function newGame(name){
   G.n=+els('sizeSel').value;
+  G.name=normalizeName(name||randomName());
+  location.hash=G.n+'/'+encodeURIComponent(G.name.replace(/ /g,'-'));
   G.ready=false; G.revealed=false;
   G.foundReq.clear(); G.foundBonus.clear();
   clearSelection();
@@ -63098,20 +63133,31 @@ function newGame(){
   renderGrid();
   overlay.style.display='flex';
   genInfo.textContent='';
-  generateBoard(G.n,
-    (words,score,iter)=>{ genInfo.textContent=`best so far: ${words} words (score ${Math.round(score)}) · ${iter} tries`; },
+  document.querySelector('#genOverlay .big').textContent=`Generating “${G.name}”…`;
+  generateBoard(G.n, G.name,
+    (words,score,iter,total)=>{ genInfo.textContent=`${words} words · ${Math.round(100*iter/total)}%`; },
     (board,found,nbr)=>{
       G.board=board; G.nbr=nbr;
       G.required=found.common; G.bonus=found.bonus;
       overlay.style.display='none';
       G.ready=true;
       renderGrid();
-      els('boardStats').textContent=`${found.common.size} words to find · ${found.bonus.size} hidden bonus words`;
+      els('boardStats').innerHTML=`<b>“${G.name}”</b> · ${found.common.size} words to find · ${found.bonus.size} hidden bonus words`;
       renderWords();
     });
 }
-els('newBtn').addEventListener('click',newGame);
-els('sizeSel').addEventListener('change',newGame);
+function parseHash(){
+  const m=location.hash.match(/^#([345])\/(.+)$/);
+  if(!m) return null;
+  return {n:+m[1], name:normalizeName(decodeURIComponent(m[2]))};
+}
+els('newBtn').addEventListener('click',()=>newGame());
+els('sizeSel').addEventListener('change',()=>newGame(G.name));
+els('loadBtn').addEventListener('click',()=>{
+  const v=els('boardName').value;
+  if(v.trim()){ els('boardName').value=''; els('boardName').blur(); newGame(v); }
+});
+els('boardName').addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter') els('loadBtn').click(); });
 els('revealBtn').addEventListener('click',()=>{
   if(G.revealed)return;
   if(confirm('Reveal all remaining words? This ends the challenge for this board.')){
@@ -63120,7 +63166,9 @@ els('revealBtn').addEventListener('click',()=>{
 });
 window.addEventListener('resize',()=>{ if(G.ready){renderGrid(); if(G.sel.length)highlight(G.sel);} });
 
-newGame();
+const startup=parseHash();
+if(startup){ els('sizeSel').value=startup.n; newGame(startup.name); }
+else newGame();
 </script>
 </body>
 </html>
