@@ -62763,7 +62763,7 @@ const TRIE = buildTrie();
      - pure suffix add-on of a listed stem  (mote->motes, sing->singer)  -> 1/8 weight
      - spelling-changing variation of one   (bury->buries, make->making) -> 1/4 weight
      - stem not on the list (cats w/o cat, piling w/o pile)              -> full weight
-   Base weight is superlinear in length: (len-3)^1.2.
+   Base weight is superlinear in length: (len-3)^1.5.
    Precompute candidate stems per word; resolve against the board at score time. */
 const STEM_BASES = (()=>{
   const map = new Map();
@@ -62801,7 +62801,7 @@ function scoreOf(found){
     let m=1;
     const bases=STEM_BASES.get(w);
     if(bases) for(const [b,mm] of bases){ if(mm<m && found.common.has(b)){ m=mm; if(m===0.125)break; } }
-    s += Math.pow(w.length-3, 1.2)*m;
+    s += Math.pow(w.length-3, 1.5)*m;
   }
   return s;
 }
