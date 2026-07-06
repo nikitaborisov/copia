@@ -65,6 +65,20 @@
   #bonusSection{margin-top:14px; border-top:1px solid var(--panel2); padding-top:10px;}
   #bonusSection h3{font-size:14px; margin:0 0 6px; color:var(--bonus);}
   #revealBtn{margin-top:14px; width:100%;}
+  #savesSection{margin-top:16px; border-top:1px solid var(--panel2); padding-top:10px;}
+  #savesSection h3{font-size:14px; margin:0 0 8px; color:var(--dim); font-weight:600;}
+  .saveRow{display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid transparent;
+    border-radius:8px; padding:8px 10px; margin:6px 0; cursor:pointer; font-size:13px;}
+  .saveRow:hover{border-color:var(--accent);}
+  .saveRow.current{border-color:var(--tile-edge);}
+  .saveRow .sname{font-weight:600;}
+  .saveRow .smeta{color:var(--dim); font-size:12px;}
+  .saveRow .sleft{flex:1; min-width:0;}
+  .saveRow .sprog{color:var(--accent); white-space:nowrap;}
+  .saveRow .sdone{color:var(--good);}
+  .saveRow .del{background:none; border:none; color:var(--dim); font-size:15px; padding:2px 6px; cursor:pointer;}
+  .saveRow .del:hover{color:var(--bad);}
+  #savesEmpty{color:var(--dim); font-size:13px;}
   #winBanner{display:none; margin-top:12px; padding:12px; border-radius:10px; text-align:center;
     background:linear-gradient(90deg,#7a4e0e,#a9741a); font-weight:700; font-size:16px;}
   @media (max-width:720px){ #wordsCol{max-width:none;} }
@@ -114,6 +128,10 @@
       </div>
       <button id="revealBtn">Reveal remaining words</button>
       <div id="winBanner">🎉 You found every word!</div>
+      <div id="savesSection">
+        <h3>Previous games</h3>
+        <div id="savesList"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -63038,7 +63056,7 @@ function submitWord(word, viaPath){
   }else{
     setFeedback('Not in word list','bad');
   }
-  clearSelection(); renderWords();
+  clearSelection(); renderWords(); saveProgress();
 }
 
 /* ---- pointer input ---- */
@@ -63126,6 +63144,59 @@ function renderWords(){
   els('winBanner').style.display = (total&&found===total)?'block':'none';
 }
 
+/* ---- persistence ---- */
+const SAVES_KEY='copia:saves';
+function loadSaves(){
+  try{ return JSON.parse(localStorage.getItem(SAVES_KEY))||{}; }catch(e){ return {}; }
+}
+function saveProgress(){
+  if(!G.ready) return;
+  if(G.foundReq.size===0 && G.foundBonus.size===0 && !G.revealed) return;
+  const all=loadSaves();
+  all[G.n+'/'+G.name]={n:G.n, name:G.name, ts:Date.now(), total:G.required.size,
+    found:[...G.foundReq], bonus:[...G.foundBonus], revealed:G.revealed};
+  try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(e){}
+  renderSaves();
+}
+function restoreProgress(){
+  const s=loadSaves()[G.n+'/'+G.name];
+  if(!s) return;
+  for(const w of s.found||[]) if(G.required.has(w)) G.foundReq.add(w);
+  for(const w of s.bonus||[]) if(G.bonus.has(w)) G.foundBonus.add(w);
+  G.revealed=!!s.revealed;
+}
+function renderSaves(){
+  const all=Object.entries(loadSaves()).sort((a,b)=>b[1].ts-a[1].ts);
+  const curKey=G.n+'/'+G.name;
+  if(!all.length){ els('savesList').innerHTML='<div id="savesEmpty">None yet — words you find are saved automatically.</div>'; return; }
+  let html='';
+  for(const [key,s] of all){
+    const done=s.total && s.found.length===s.total;
+    const pct=s.total?Math.round(100*s.found.length/s.total):0;
+    const d=new Date(s.ts).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+    html+=`<div class="saveRow${key===curKey?' current':''}" data-key="${key}">
+      <div class="sleft"><div class="sname">${s.name}</div>
+      <div class="smeta">${s.n}×${s.n} · ${d}</div></div>
+      <div class="sprog${done?' sdone':''}">${done?'✓ solved':s.found.length+'/'+s.total+' · '+pct+'%'}</div>
+      <button class="del" title="Delete saved game">✕</button></div>`;
+  }
+  els('savesList').innerHTML=html;
+}
+els('savesList').addEventListener('click',e=>{
+  const row=e.target.closest('.saveRow');
+  if(!row) return;
+  const key=row.dataset.key;
+  if(e.target.classList.contains('del')){
+    const all=loadSaves(); delete all[key];
+    try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(ex){}
+    renderSaves(); return;
+  }
+  const s=loadSaves()[key];
+  if(!s || (s.n===G.n && s.name===G.name)) return;
+  els('sizeSel').value=s.n;
+  newGame(s.name);
+});
+
 /* ---- new game ---- */
 function newGame(name){
   G.n=+els('sizeSel').value;
@@ -63146,9 +63217,11 @@ function newGame(name){
       G.required=found.common; G.bonus=found.bonus;
       overlay.style.display='none';
       G.ready=true;
+      restoreProgress();
       renderGrid();
       els('boardStats').innerHTML=`<b>“${G.name}”</b> · ${found.common.size} words to find · ${found.bonus.size} hidden bonus words`;
       renderWords();
+      renderSaves();
     });
 }
 function parseHash(){
@@ -63166,7 +63239,7 @@ els('boardName').addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==
 els('revealBtn').addEventListener('click',()=>{
   if(G.revealed)return;
   if(confirm('Reveal all remaining words? This ends the challenge for this board.')){
-    G.revealed=true; renderWords();
+    G.revealed=true; renderWords(); saveProgress();
   }
 });
 window.addEventListener('resize',()=>{ if(G.ready){renderGrid(); if(G.sel.length)highlight(G.sel);} });
