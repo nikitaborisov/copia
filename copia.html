@@ -62760,9 +62760,10 @@ const TRIE = buildTrie();
 
 /* Stem-aware scoring. A word is only discounted if its stem is itself on the
    same board's "words to find" list:
-     - pure suffix add-on of a listed stem  (mote->motes, sing->singer)  -> 1/4 weight
-     - spelling-changing variation of one   (bury->buries, make->making) -> 1/2 weight
+     - pure suffix add-on of a listed stem  (mote->motes, sing->singer)  -> 1/8 weight
+     - spelling-changing variation of one   (bury->buries, make->making) -> 1/4 weight
      - stem not on the list (cats w/o cat, piling w/o pile)              -> full weight
+   Base weight is superlinear in length: (len-3)^1.2.
    Precompute candidate stems per word; resolve against the board at score time. */
 const STEM_BASES = (()=>{
   const map = new Map();
@@ -62788,7 +62789,7 @@ const STEM_BASES = (()=>{
     const list=[];
     for(const b of cands){
       if(b!==w && b.length>=4 && commonSet.has(b))
-        list.push([b, w.startsWith(b) ? 0.25 : 0.5]);
+        list.push([b, w.startsWith(b) ? 0.125 : 0.25]);
     }
     if(list.length){ list.sort((a,c)=>a[1]-c[1]); map.set(w,list); }
   }
@@ -62799,8 +62800,8 @@ function scoreOf(found){
   for(const w of found.common){
     let m=1;
     const bases=STEM_BASES.get(w);
-    if(bases) for(const [b,mm] of bases){ if(mm<m && found.common.has(b)){ m=mm; if(m===0.25)break; } }
-    s += (w.length-3)*m;
+    if(bases) for(const [b,mm] of bases){ if(mm<m && found.common.has(b)){ m=mm; if(m===0.125)break; } }
+    s += Math.pow(w.length-3, 1.2)*m;
   }
   return s;
 }
