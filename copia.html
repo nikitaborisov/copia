@@ -53,6 +53,8 @@
   #wordsCol{flex:1; min-width:300px; max-width:420px; background:var(--panel); border-radius:14px; padding:16px 18px;}
   #progressBarWrap{background:var(--panel2); border-radius:8px; height:14px; overflow:hidden; margin:8px 0 4px;}
   #progressBar{height:100%; width:0%; background:linear-gradient(90deg,var(--tile-sel),var(--accent)); transition:width .3s;}
+  #scoreBarWrap{background:var(--panel2); border-radius:8px; height:8px; overflow:hidden; margin:0 0 4px;}
+  #scoreBar{height:100%; width:0%; background:linear-gradient(90deg,#8a5a10,var(--bonus)); transition:width .3s;}
   #progressText{font-size:14px; color:var(--dim); margin-bottom:10px;}
   details{margin:6px 0; background:var(--panel2); border-radius:8px; padding:6px 10px;}
   summary{cursor:pointer; font-size:14px; font-weight:600; padding:4px 0;}
@@ -126,6 +128,7 @@
     <div id="wordsCol">
       <div style="font-weight:700;font-size:16px;">Words to find</div>
       <div id="progressBarWrap"><div id="progressBar"></div></div>
+      <div id="scoreBarWrap"><div id="scoreBar"></div></div>
       <div id="progressText"></div>
       <div id="wordGroups"></div>
       <div id="bonusSection">
@@ -52304,8 +52307,33 @@ const G = {
   n:4, name:'', board:[], nbr:null,
   required:new Set(), bonus:new Set(),
   foundReq:new Set(), foundBonus:new Set(),
+  scores:new Map(), totalScore:0, maxScore:1,
   sel:[], typing:'', revealed:false, ready:false,
 };
+
+/* Display-only word scores: same formula and board-relative stem penalty as
+   generation scoring, but computed per word for the UI. Does NOT affect
+   board generation (no GEN_VERSION bump needed). */
+function stemMult(w, present){
+  let m=1;
+  const bases=STEM_BASES.get(w);
+  if(bases) for(const [b,mm] of bases){ if(mm<m && present.has(b)) m=mm; }
+  return m;
+}
+function displayScore(w){
+  return (Math.pow(w.length-3,1.5) + Math.log(RANK.get(w))/Math.log(10000)*10) * stemMult(w, G.required);
+}
+function computeScores(){
+  G.scores=new Map();
+  let tot=0, mx=0;
+  for(const w of G.required){ const s=displayScore(w); G.scores.set(w,s); tot+=s; if(s>mx)mx=s; }
+  for(const w of G.bonus) G.scores.set(w, displayScore(w));
+  G.totalScore=tot; G.maxScore=mx||1;
+}
+function scoreColor(t){
+  t=Math.max(0,Math.min(1,Math.sqrt(t)));
+  return `hsl(${Math.round((348+55*t)%360)} ${Math.round(15+75*t)}% ${Math.round(65-3*t)}%)`;
+}
 
 function tileSize(n){ return Math.min(84, Math.floor((Math.min(window.innerWidth-48,420))/n)-8); }
 
@@ -52363,10 +52391,10 @@ function submitWord(word, viaPath){
   if(G.foundReq.has(word)||G.foundBonus.has(word)){ setFeedback('Already found','bad'); clearSelection(); return; }
   if(G.required.has(word)){
     G.foundReq.add(word);
-    setFeedback('✓ '+word.toUpperCase(),'good');
+    setFeedback('✓ '+word.toUpperCase()+'  +'+G.scores.get(word).toFixed(1),'good');
   }else if(G.bonus.has(word)){
     G.foundBonus.add(word);
-    setFeedback('★ Bonus: '+word.toUpperCase(),'bonus');
+    setFeedback('★ Bonus: '+word.toUpperCase()+'  +'+G.scores.get(word).toFixed(1),'bonus');
   }else{
     setFeedback('Not in word list','bad');
   }
@@ -52443,18 +52471,20 @@ function renderWords(){
     const open = L<=5 ? ' open' : '';
     html+=`<details${open}><summary>${L} letters <span class="cnt ${foundHere.length===g.all.length?'done':''}">${foundHere.length} / ${g.all.length}</span></summary><div class="wordChips">`;
     for(const w of g.all){
-      if(G.foundReq.has(w)) html+=`<span class="chip">${w}</span>`;
-      else if(G.revealed) html+=`<span class="chip revealed">${w}</span>`;
+      if(G.foundReq.has(w)) html+=`<span class="chip" style="color:${scoreColor(G.scores.get(w)/G.maxScore)}" title="+${G.scores.get(w).toFixed(1)}">${w}</span>`;
+      else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w).toFixed(1)}">${w}</span>`;
       else html+=`<span class="chip blank">${'•'.repeat(w.length)}</span>`;
     }
     html+='</div></details>';
   }
   els('wordGroups').innerHTML=html;
   const total=G.required.size, found=G.foundReq.size;
+  let fs=0; for(const w of G.foundReq) fs+=G.scores.get(w)||0;
   els('progressBar').style.width=(total?100*found/total:0)+'%';
-  els('progressText').textContent=`${found} of ${total} words found`;
+  els('scoreBar').style.width=(G.totalScore?100*fs/G.totalScore:0)+'%';
+  els('progressText').textContent=`${found} of ${total} words · ${Math.round(fs)} of ${Math.round(G.totalScore)} pts`;
   els('bonusCount').textContent=G.foundBonus.size;
-  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(w=>`<span class="chip" style="color:var(--bonus)">${w}</span>`).join('');
+  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(w=>`<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${(G.scores.get(w)||0).toFixed(1)}">${w}</span>`).join('');
   els('winBanner').style.display = (total&&found===total)?'block':'none';
 }
 
@@ -52539,6 +52569,7 @@ function newGame(name){
     (board,found,nbr)=>{
       G.board=board; G.nbr=nbr;
       G.required=found.common; G.bonus=found.bonus;
+      computeScores();
       overlay.style.display='none';
       G.ready=true;
       restoreProgress();
