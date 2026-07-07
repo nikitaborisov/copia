@@ -67,6 +67,12 @@
   #revealBtn{margin-top:14px; width:100%;}
   #savesSection{margin-top:16px; border-top:1px solid var(--panel2); padding-top:10px;}
   #savesSection h3{font-size:14px; margin:0 0 8px; color:var(--dim); font-weight:600;}
+  #savesHead{display:flex; align-items:center; justify-content:space-between;}
+  #cleanupBtn{font-size:12px; padding:4px 10px; display:none;}
+  .saveRow.stale{opacity:.45;}
+  .saveRow.stale:hover{border-color:transparent;}
+  .saveRow.stale .del{pointer-events:auto;}
+  .vbadge{font-size:11px; color:var(--dim); border:1px solid var(--tile-edge); border-radius:4px; padding:0 4px; margin-left:6px;}
   .saveRow{display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid transparent;
     border-radius:8px; padding:8px 10px; margin:6px 0; cursor:pointer; font-size:13px;}
   .saveRow:hover{border-color:var(--accent);}
@@ -129,7 +135,10 @@
       <button id="revealBtn">Reveal remaining words</button>
       <div id="winBanner">🎉 You found every word!</div>
       <div id="savesSection">
-        <h3>Previous games</h3>
+        <div id="savesHead">
+          <h3>Previous games</h3>
+          <button id="cleanupBtn" title="Delete saves from older generator versions">Clear old versions</button>
+        </div>
         <div id="savesList"></div>
       </div>
     </div>
@@ -25333,8 +25342,14 @@ function seedBoard(n, rng){
 
 /* Deterministic generation: the board name seeds a PRNG and the hill climb runs
    a FIXED number of iterations, so "4x4 curious elephant" is the same board on
-   every device. Do not change GEN_ITERS or the mutation logic without accepting
-   that all existing board names will reshuffle. */
+   every device — but only within one GEN_VERSION.
+
+   >>> BUMP GEN_VERSION whenever ANYTHING affecting board generation changes: <<<
+   the embedded dictionary, WORD_OK, the rank split, scoreOf/STEM_BASES scoring,
+   GEN_ITERS, seedBoard, hashStr/mulberry32, or the mutation logic in
+   generateBoard. Saved games record the version they were played on; saves from
+   other versions are shown greyed out and are not restored. */
+const GEN_VERSION = 1;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 function generateBoard(n, name, onProgress, onDone){
   const rng = mulberry32(hashStr(n+'x'+n+':'+normalizeName(name)));
@@ -25541,14 +25556,14 @@ function saveProgress(){
   if(!G.ready) return;
   if(G.foundReq.size===0 && G.foundBonus.size===0 && !G.revealed) return;
   const all=loadSaves();
-  all[G.n+'/'+G.name]={n:G.n, name:G.name, ts:Date.now(), total:G.required.size,
+  all[G.n+'/'+G.name]={n:G.n, name:G.name, v:GEN_VERSION, ts:Date.now(), total:G.required.size,
     found:[...G.foundReq], bonus:[...G.foundBonus], revealed:G.revealed};
   try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(e){}
   renderSaves();
 }
 function restoreProgress(){
   const s=loadSaves()[G.n+'/'+G.name];
-  if(!s) return;
+  if(!s || s.v!==GEN_VERSION) return;
   for(const w of s.found||[]) if(G.required.has(w)) G.foundReq.add(w);
   for(const w of s.bonus||[]) if(G.bonus.has(w)) G.foundBonus.add(w);
   G.revealed=!!s.revealed;
@@ -25557,19 +25572,28 @@ function renderSaves(){
   const all=Object.entries(loadSaves()).sort((a,b)=>b[1].ts-a[1].ts);
   const curKey=G.n+'/'+G.name;
   if(!all.length){ els('savesList').innerHTML='<div id="savesEmpty">None yet — words you find are saved automatically.</div>'; return; }
-  let html='';
+  let html='', anyStale=false;
   for(const [key,s] of all){
+    const stale=s.v!==GEN_VERSION;
+    if(stale) anyStale=true;
     const done=s.total && s.found.length===s.total;
     const pct=s.total?Math.round(100*s.found.length/s.total):0;
     const d=new Date(s.ts).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
-    html+=`<div class="saveRow${key===curKey?' current':''}" data-key="${key}">
-      <div class="sleft"><div class="sname">${s.name}</div>
+    html+=`<div class="saveRow${key===curKey?' current':''}${stale?' stale':''}" data-key="${key}">
+      <div class="sleft"><div class="sname">${s.name}${stale?`<span class="vbadge" title="Played on an older board generator — this board can no longer be regenerated">v${s.v||0}</span>`:''}</div>
       <div class="smeta">${s.n}×${s.n} · ${d}</div></div>
       <div class="sprog${done?' sdone':''}">${done?'✓ solved':s.found.length+'/'+s.total+' · '+pct+'%'}</div>
       <button class="del" title="Delete saved game">✕</button></div>`;
   }
   els('savesList').innerHTML=html;
+  els('cleanupBtn').style.display=anyStale?'inline-block':'none';
 }
+els('cleanupBtn').addEventListener('click',()=>{
+  const all=loadSaves(), keep={};
+  for(const [k,s] of Object.entries(all)) if(s.v===GEN_VERSION) keep[k]=s;
+  try{ localStorage.setItem(SAVES_KEY, JSON.stringify(keep)); }catch(e){}
+  renderSaves();
+});
 els('savesList').addEventListener('click',e=>{
   const row=e.target.closest('.saveRow');
   if(!row) return;
@@ -25579,6 +25603,7 @@ els('savesList').addEventListener('click',e=>{
     try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(ex){}
     renderSaves(); return;
   }
+  if(row.classList.contains('stale')) return;
   const s=loadSaves()[key];
   if(!s || (s.n===G.n && s.name===G.name)) return;
   els('sizeSel').value=s.n;
