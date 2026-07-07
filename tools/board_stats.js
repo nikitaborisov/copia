@@ -40,9 +40,10 @@ const engine = new Function(code + `
   return {COMMON, BONUS, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
           hashStr, mulberry32, normalizeName, randLetter,
           neighborsTable, solve, seedBoard, scoreOf};`)();
-const { RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
+const { COMMON, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
         hashStr, mulberry32, normalizeName, randLetter,
         neighborsTable, solve, seedBoard, scoreOf } = engine;
+const FIND_N = COMMON.length;
 
 /* ---- synchronous generation (same algorithm as generateBoard) ---- */
 function genSync(n, name) {
@@ -80,7 +81,8 @@ function boardStats(found) {
   };
   for (const w of words) {
     s.byLen[w.length] = (s.byLen[w.length] || 0) + 1;
-    const rb = Math.min(10, Math.max(1, Math.ceil(rarity(w))));
+    // rank decile within the find list: 1 = most common 10%, 10 = rarest 10%
+    const rb = Math.min(10, Math.max(1, Math.ceil(10 * RANK.get(w) / FIND_N)));
     s.byRarity[rb] = (s.byRarity[rb] || 0) + 1;
     const m = stemMult(w, words);
     if (m === 0.125) s.stemEighth++;
@@ -121,6 +123,10 @@ const lens = [...new Set(all.flatMap(s => Object.keys(s.byLen)))].map(Number).so
 for (const L of lens)
   console.log(`  ${String(L).padStart(2)}  ${fmt(col(s => s.byLen[L] || 0))}`);
 
-console.log('\nrarity histogram (rarity term bucket -> mean words per board)');
-for (let b = 1; b <= 10; b++)
-  console.log(`  ${b <= 1 ? '<=1' : ' ' + (b === 10 ? '>9' : '=' + b)}  ${fmt(col(s => s.byRarity[b] || 0))}`);
+console.log('\nrank-decile histogram (find list decile -> mean words per board)');
+for (let b = 1; b <= 10; b++) {
+  const lo = Math.round((b - 1) * FIND_N / 10) + 1, hi = Math.round(b * FIND_N / 10);
+  const rarLo = (Math.log(lo) / Math.log(10000) * 10), rarHi = (Math.log(hi) / Math.log(10000) * 10);
+  console.log(`  d${String(b).padStart(2)} rank ${String(lo).padStart(5)}-${String(hi).padEnd(5)}` +
+    ` rarity ${rarLo.toFixed(1)}-${rarHi.toFixed(1)}  ${fmt(col(s => s.byRarity[b] || 0))}`);
+}
