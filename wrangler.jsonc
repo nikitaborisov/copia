@@ -1,0 +1,7 @@
+// Cloudflare Workers configuration (assets-only: serves the static game).
+// Later phases (save sync etc.) add "main" + KV/D1 bindings here.
+{
+	"name": "copia",
+	"compatibility_date": "2026-07-01",
+	"assets": { "directory": "./out" }
+}
