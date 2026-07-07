@@ -37,12 +37,12 @@ code = code.slice(0, code.indexOf('/* ================= game state & UI'));
 
 global.document = { getElementById: id => (id === 'dict-data' ? { textContent: dict } : undefined) };
 const engine = new Function(code + `
-  return {COMMON, BONUS, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
+  return {SCORING, COMMON, BONUS, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
           hashStr, mulberry32, normalizeName, randLetter,
-          neighborsTable, solve, seedBoard, scoreOf};`)();
-const { COMMON, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
+          neighborsTable, solve, seedBoard, scoreOf, wordScore, stemMult};`)();
+const { SCORING, COMMON, RANK, GEN_ITERS, GEN_VERSION,
         hashStr, mulberry32, normalizeName, randLetter,
-        neighborsTable, solve, seedBoard, scoreOf } = engine;
+        neighborsTable, solve, seedBoard, scoreOf, stemMult } = engine;
 const FIND_N = COMMON.length;
 
 /* ---- synchronous generation (same algorithm as generateBoard) ---- */
@@ -65,19 +65,12 @@ function genSync(n, name) {
   return { board, best, bestScore };
 }
 
-/* ---- per-board stats ---- */
-const rarity = w => Math.log(RANK.get(w)) / Math.log(10000) * 10;
-function stemMult(w, present) {
-  let m = 1;
-  const bases = STEM_BASES.get(w);
-  if (bases) for (const [b, mm] of bases) if (mm < m && present.has(b)) m = mm;
-  return m;
-}
+/* ---- per-board stats (scoring functions/constants come from the engine) ---- */
 function boardStats(found) {
   const words = found.common;
   const s = {
     words: words.size, bonus: found.bonus.size,
-    byLen: {}, byRarity: {}, stemEighth: 0, stemQuarter: 0,
+    byLen: {}, byRarity: {}, stemDirect: 0, stemVariation: 0,
   };
   for (const w of words) {
     s.byLen[w.length] = (s.byLen[w.length] || 0) + 1;
@@ -85,8 +78,8 @@ function boardStats(found) {
     const rb = Math.min(10, Math.max(1, Math.ceil(10 * RANK.get(w) / FIND_N)));
     s.byRarity[rb] = (s.byRarity[rb] || 0) + 1;
     const m = stemMult(w, words);
-    if (m === 0.125) s.stemEighth++;
-    else if (m === 0.25) s.stemQuarter++;
+    if (m === SCORING.STEM_DIRECT) s.stemDirect++;
+    else if (m === SCORING.STEM_VARIATION) s.stemVariation++;
   }
   return s;
 }
@@ -102,7 +95,7 @@ for (let i = 1; i <= N; i++) {
   s.score = g.bestScore;
   all.push(s);
   if (VERBOSE) console.log(`  ${name}: ${s.words} words, score ${s.score.toFixed(0)}, ` +
-    `stem ${s.stemEighth}+${s.stemQuarter}, board ${g.board.join('')}`);
+    `stem ${s.stemDirect}+${s.stemVariation}, board ${g.board.join('')}`);
 }
 console.log(`generated in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
 
@@ -114,9 +107,9 @@ const col = (get) => all.map(get);
 console.log(`find words      ${fmt(col(s => s.words))}`);
 console.log(`bonus words     ${fmt(col(s => s.bonus))}`);
 console.log(`gen score       ${fmt(col(s => s.score))}`);
-console.log(`stem 1/8        ${fmt(col(s => s.stemEighth))}`);
-console.log(`stem 1/4        ${fmt(col(s => s.stemQuarter))}`);
-console.log(`stem any        ${fmt(col(s => s.stemEighth + s.stemQuarter))}`);
+console.log(`stem direct (x${SCORING.STEM_DIRECT})     ${fmt(col(s => s.stemDirect))}`);
+console.log(`stem variation (x${SCORING.STEM_VARIATION})  ${fmt(col(s => s.stemVariation))}`);
+console.log(`stem any        ${fmt(col(s => s.stemDirect + s.stemVariation))}`);
 
 console.log('\nlength histogram (mean words per board)');
 const lens = [...new Set(all.flatMap(s => Object.keys(s.byLen)))].map(Number).sort((a, b) => a - b);
@@ -126,7 +119,8 @@ for (const L of lens)
 console.log('\nrank-decile histogram (find list decile -> mean words per board)');
 for (let b = 1; b <= 10; b++) {
   const lo = Math.round((b - 1) * FIND_N / 10) + 1, hi = Math.round(b * FIND_N / 10);
-  const rarLo = (Math.log(lo) / Math.log(10000) * 10), rarHi = (Math.log(hi) / Math.log(10000) * 10);
+  const rarLo = Math.log(lo) / Math.log(SCORING.RARITY_REF) * SCORING.RARITY_SCALE,
+        rarHi = Math.log(hi) / Math.log(SCORING.RARITY_REF) * SCORING.RARITY_SCALE;
   console.log(`  d${String(b).padStart(2)} rank ${String(lo).padStart(5)}-${String(hi).padEnd(5)}` +
     ` rarity ${rarLo.toFixed(1)}-${rarHi.toFixed(1)}  ${fmt(col(s => s.byRarity[b] || 0))}`);
 }
