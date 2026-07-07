@@ -52112,6 +52112,28 @@ const COMMON=[], BONUS=[], RANK=new Map(), STEM_BASES=new Map();
 }
 const commonSet = new Set(COMMON), bonusSet = new Set(BONUS);
 
+/* Effective rank for the rarity term: a stemmed word inherits the best
+   (most common, lowest) rank in its stem family, transitively
+   (carriers -> carrier -> carry), so inflections never score as rarer than
+   the word they derive from. */
+const EFF_RANK = new Map();
+function computeEffRank(w, seen){
+  if(EFF_RANK.has(w)) return EFF_RANK.get(w);
+  let r = RANK.get(w);
+  const bases = STEM_BASES.get(w);
+  if(bases){
+    seen = seen || new Set([w]);
+    for(const [b] of bases){
+      if(seen.has(b) || !RANK.has(b)) continue;
+      seen.add(b);
+      r = Math.min(r, computeEffRank(b, seen));
+    }
+  }
+  EFF_RANK.set(w, r);
+  return r;
+}
+for(const w of RANK.keys()) computeEffRank(w);
+
 // trie: children in Map, flag 1 = common word end, 2 = bonus word end
 function buildTrie(){
   const root = {c:new Map(), f:0};
@@ -52138,7 +52160,7 @@ const TRIE = buildTrie();
    single implementation of scoring, used by generation, the UI, and tools. */
 function wordScore(w){
   return Math.pow(w.length-3, SCORING.LENGTH_EXP)
-       + Math.log(RANK.get(w))/Math.log(SCORING.RARITY_REF)*SCORING.RARITY_SCALE;
+       + Math.log(EFF_RANK.get(w))/Math.log(SCORING.RARITY_REF)*SCORING.RARITY_SCALE;
 }
 function stemMult(w, present){
   let m=1;
@@ -52272,7 +52294,7 @@ function seedBoard(n, rng){
    GEN_ITERS, seedBoard, hashStr/mulberry32, or the mutation logic in
    generateBoard. Saved games record the version they were played on; saves from
    other versions are shown greyed out and are not restored. */
-const GEN_VERSION = 3;
+const GEN_VERSION = 4;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 function generateBoard(n, name, onProgress, onDone){
   const rng = mulberry32(hashStr(n+'x'+n+':'+normalizeName(name)));
