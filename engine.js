@@ -38,7 +38,7 @@ const SCORING = {
    or the mutation logic in startClimb. Saved games record the version they
    were played on; saves from other versions are shown greyed out and are not
    restored. */
-const GEN_VERSION = 6;
+const GEN_VERSION = 7;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 
 /* ================= seeded RNG ================= */
@@ -187,9 +187,15 @@ function createEngine(dictText){
      STEM_BASES comes from the dictionary artifact (pattern stems at build
      time). These three functions are the single implementation of scoring,
      used by generation, the UI, and tools. */
+  function lengthScore(w){
+    return Math.round(Math.pow(w.length-3, SCORING.LENGTH_EXP));
+  }
+  function rarityScore(w){
+    return Math.round(Math.log(EFF_RANK.get(w))/Math.log(SCORING.RARITY_REF)*SCORING.RARITY_SCALE);
+  }
+  // both parts rounded to the nearest integer, so all word scores are integers
   function wordScore(w){
-    return Math.pow(w.length-3, SCORING.LENGTH_EXP)
-         + Math.log(EFF_RANK.get(w))/Math.log(SCORING.RARITY_REF)*SCORING.RARITY_SCALE;
+    return lengthScore(w) + rarityScore(w);
   }
   function stemMult(w, present){
     let m=1;
@@ -201,6 +207,17 @@ function createEngine(dictText){
     let s=0;
     for(const w of found.common) s += wordScore(w)*stemMult(w, found.common);
     return s;
+  }
+  /* Words whose score is fully zeroed on this board (a stem base is present
+     and the stem multiplier is 0). The UI drops these from the find/bonus
+     lists entirely and shows a "stem extension" hint instead. Automatically
+     empty if SCORING makes stem multipliers nonzero. Does not affect
+     scoreOf/generation (these words already contribute 0). */
+  function stemExtensions(found){
+    const out = new Set();
+    for(const w of found.common) if(stemMult(w, found.common)===0) out.add(w);
+    for(const w of found.bonus)  if(stemMult(w, found.common)===0) out.add(w);
+    return out;
   }
 
   /* ---- solver: all findable words, as {common:Set, bonus:Set} ---- */
@@ -297,7 +314,7 @@ function createEngine(dictText){
 
   return {
     DICT_VERSION, COMMON, BONUS, RANK, EFF_RANK, STEM_BASES,
-    wordScore, stemMult, scoreOf,
+    wordScore, lengthScore, rarityScore, stemMult, scoreOf, stemExtensions,
     solve, seedBoard, randLetter,
     generateBoard, generateBoardSync,
   };

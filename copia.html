@@ -34,6 +34,13 @@
     text-transform:uppercase; color:var(--accent);}
   #feedback{height:22px; font-size:15px; color:var(--dim); transition:opacity .2s;}
   #feedback.good{color:var(--good);} #feedback.bonus{color:var(--bonus);} #feedback.bad{color:var(--bad);}
+  #feedback.ext{color:var(--dim);}
+  #feedback.k1{color:var(--good);}
+  #feedback.k2{color:var(--accent); font-weight:600;}
+  #feedback.k3{color:var(--bonus); font-weight:700; animation:kudos .5s ease;}
+  #feedback.k4{color:#fff; font-weight:700; text-shadow:0 0 14px var(--bonus); animation:kudos .5s ease;}
+  @keyframes kudos{0%{transform:scale(.8)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+  #currentWord.ext{color:var(--dim); text-decoration:line-through;}
   #gridWrap{position:relative; touch-action:none;}
   #grid{display:grid; gap:8px;}
   .tile{width:var(--ts); height:var(--ts); background:var(--tile); border:2px solid var(--tile-edge);
@@ -51374,7 +51381,7 @@ yurts</script>
    is only the game state & UI. The dictionary artifact stays embedded in the
    dict-data block above (see build/build_dict.py). */
 const {GEN_VERSION, normalizeName, randomName, findPath} = CopiaEngine;
-const {wordScore, stemMult, generateBoard} =
+const {wordScore, stemMult, stemExtensions, rarityScore, generateBoard, COMMON, EFF_RANK, STEM_BASES} =
   CopiaEngine.createEngine(document.getElementById('dict-data').textContent);
 
 /* ================= game state & UI ================= */
@@ -51385,11 +51392,28 @@ const grid=els('grid'), gridWrap=els('gridWrap'), overlay=els('genOverlay'),
 
 const G = {
   n:4, name:'', board:[], nbr:null,
-  required:new Set(), bonus:new Set(),
+  required:new Set(), bonus:new Set(), stemExt:new Set(),
   foundReq:new Set(), foundBonus:new Set(),
   scores:new Map(), totalScore:0, maxScore:1,
   sel:[], typing:'', revealed:false, ready:false,
 };
+
+/* Rarity kudos: tiered by effective-rank position within the find list.
+   Find-tier words top out at "epic"; "legendary" is reserved for words from
+   deep in the bonus tier (rank fraction > 1.2). */
+function kudos(w){
+  const f = (EFF_RANK.get(w)||0)/COMMON.length;
+  if(f>=1.2) return ['✦ LEGENDARY find!', 'k4'];
+  if(f>=0.9) return ['✦ epic find!', 'k3'];
+  if(f>=0.65) return ['✦ rare find', 'k2'];
+  if(f>=0.4) return ['nice — uncommon', 'k1'];
+  return null;
+}
+function stemBaseOf(w){
+  for(const [b] of (STEM_BASES.get(w)||[]))
+    if(G.required.has(b)) return b;
+  return null;
+}
 
 /* Display scores reuse the single scoring implementation (wordScore/stemMult
    above) against this board's find list. */
@@ -51453,7 +51477,12 @@ function highlight(indices, cls='sel'){
 function clearSelection(){
   G.sel=[]; G.typing='';
   highlight([]); linesSvg.innerHTML='';
-  curWordEl.textContent='';
+  updateCurWord('');
+}
+/* live "you're entering a 0-point stem extension" indication */
+function updateCurWord(word){
+  curWordEl.textContent=word;
+  curWordEl.classList.toggle('ext', !!word && G.stemExt.has(word));
 }
 
 /* ---- word submission ---- */
@@ -51462,12 +51491,17 @@ function submitWord(word, viaPath){
   const onBoard = viaPath || !!findPath(G.board,G.nbr,word);
   if(!onBoard){ setFeedback("Can't trace that on this board",'bad'); clearSelection(); return; }
   if(G.foundReq.has(word)||G.foundBonus.has(word)){ setFeedback('Already found','bad'); clearSelection(); return; }
-  if(G.required.has(word)){
+  if(G.stemExt.has(word)){
+    const base=stemBaseOf(word);
+    setFeedback(word.toUpperCase()+(base?' extends '+base.toUpperCase():' is a stem extension')+' — worth 0 pts','ext');
+  }else if(G.required.has(word)){
     G.foundReq.add(word);
-    setFeedback('✓ '+word.toUpperCase()+'  +'+G.scores.get(word).toFixed(1),'good');
+    const k=kudos(word);
+    setFeedback('✓ '+word.toUpperCase()+'  +'+G.scores.get(word)+(k?'  ·  '+k[0]:''), k?k[1]:'good');
   }else if(G.bonus.has(word)){
     G.foundBonus.add(word);
-    setFeedback('★ Bonus: '+word.toUpperCase()+'  +'+G.scores.get(word).toFixed(1),'bonus');
+    const k=kudos(word);
+    setFeedback('★ Bonus: '+word.toUpperCase()+'  +'+G.scores.get(word)+(k?'  ·  '+k[0]:''), k?k[1]:'bonus');
   }else{
     setFeedback('Not in word list','bad');
   }
@@ -51492,7 +51526,7 @@ gridWrap.addEventListener('pointerdown',e=>{
   if(i<0)return;
   dragging=true; G.typing='';
   G.sel=[i];
-  highlight(G.sel); curWordEl.textContent=G.board[i];
+  highlight(G.sel); updateCurWord(G.board[i]);
   gridWrap.setPointerCapture(e.pointerId);
 });
 gridWrap.addEventListener('pointermove',e=>{
@@ -51506,7 +51540,7 @@ gridWrap.addEventListener('pointermove',e=>{
   else if(!G.sel.includes(i) && G.nbr[last].includes(i)){ G.sel.push(i); }
   else return;
   highlight(G.sel);
-  curWordEl.textContent=G.sel.map(j=>G.board[j]).join('');
+  updateCurWord(G.sel.map(j=>G.board[j]).join(''));
 });
 window.addEventListener('pointerup',()=>{
   if(!dragging)return;
@@ -51523,7 +51557,7 @@ window.addEventListener('keydown',e=>{
   else if(/^[a-zA-Z]$/.test(e.key)){ G.typing+=e.key.toLowerCase(); }
   else return;
   G.sel=[];
-  curWordEl.textContent=G.typing;
+  updateCurWord(G.typing);
   const p = G.typing ? findPath(G.board,G.nbr,G.typing) : null;
   if(p) highlight(p,'hint'); else { highlight([]); linesSvg.innerHTML=''; }
 });
@@ -51544,8 +51578,8 @@ function renderWords(){
     const open = L<=5 ? ' open' : '';
     html+=`<details${open}><summary>${L} letters <span class="cnt ${foundHere.length===g.all.length?'done':''}">${foundHere.length} / ${g.all.length}</span></summary><div class="wordChips">`;
     for(const w of g.all){
-      if(G.foundReq.has(w)) html+=`<span class="chip" style="color:${scoreColor(G.scores.get(w)/G.maxScore)}" title="+${G.scores.get(w).toFixed(1)}">${w}</span>`;
-      else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w).toFixed(1)}">${w}</span>`;
+      if(G.foundReq.has(w)) html+=`<span class="chip" style="color:${scoreColor(G.scores.get(w)/G.maxScore)}" title="+${G.scores.get(w)}">${w}</span>`;
+      else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w)}">${w}</span>`;
       else html+=`<span class="chip blank">${'•'.repeat(w.length)}</span>`;
     }
     html+='</div></details>';
@@ -51557,7 +51591,7 @@ function renderWords(){
   els('scoreBar').style.width=(G.totalScore?100*fs/G.totalScore:0)+'%';
   els('progressText').textContent=`${found} of ${total} words · ${Math.round(fs)} of ${Math.round(G.totalScore)} pts`;
   els('bonusCount').textContent=G.foundBonus.size;
-  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(w=>`<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${(G.scores.get(w)||0).toFixed(1)}">${w}</span>`).join('');
+  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(w=>`<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${G.scores.get(w)||0}">${w}</span>`).join('');
   els('winBanner').style.display = (total&&found===total)?'block':'none';
 }
 
@@ -51641,13 +51675,17 @@ function newGame(name){
     (words,score,iter,total)=>{ genInfo.textContent=`${words} words · ${Math.round(100*iter/total)}%`; },
     (board,found,nbr)=>{
       G.board=board; G.nbr=nbr;
-      G.required=found.common; G.bonus=found.bonus;
+      // words fully zeroed by a stem on this board are not part of the game
+      G.stemExt=stemExtensions(found);
+      G.required=new Set([...found.common].filter(w=>!G.stemExt.has(w)));
+      G.bonus=new Set([...found.bonus].filter(w=>!G.stemExt.has(w)));
       computeScores();
       overlay.style.display='none';
       G.ready=true;
       restoreProgress();
       renderGrid();
-      els('boardStats').innerHTML=`<b>“${G.name}”</b> · ${found.common.size} words to find · ${found.bonus.size} hidden bonus words`;
+      els('boardStats').innerHTML=`<b>“${G.name}”</b> · ${G.required.size} words to find · ${G.bonus.size} hidden bonus words`+
+        (G.stemExt.size?` · <span title="0-point extensions of listed words (e.g. plurals) — not counted">${G.stemExt.size} stem extensions excluded</span>`:'');
       renderWords();
       renderSaves();
     });
