@@ -38,7 +38,7 @@ const SCORING = {
    or the mutation logic in startClimb. Saved games record the version they
    were played on; saves from other versions are shown greyed out and are not
    restored. */
-const GEN_VERSION = 5;
+const GEN_VERSION = 6;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 
 /* ================= seeded RNG ================= */

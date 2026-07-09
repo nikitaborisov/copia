@@ -8,6 +8,17 @@ Generates the versioned word-list artifact embedded in copia.html:
   - bonus words               = BONUS_ZIPF <= zipf < FIND_ZIPF
   - words are ranked in descending frequency (ties broken alphabetically)
     across both tiers; rank feeds the in-game rarity score
+  - NAME-POLLUTION POLICY (see find_names.py for the analysis behind it):
+    wordfreq case-folds, so name-heavy strings get inflated zipf. Using
+    SUBTLEX-US case counts (FREQcount/FREQlow), find-tier words are:
+      * removed entirely   if cap_ratio >= NAME_REMOVE_RATIO (0.95)  (marc, york)
+      * demoted to bonus   if cap_ratio >= NAME_DEMOTE_RATIO (0.90)  (united)
+      * demoted to bonus   if absent from SUBTLEX (frequency must come from
+        case-folded web corpora; also catches post-2007 internet vocabulary,
+        which is an accepted trade-off)                              (tian, meme)
+      * left alone         if SUBTLEX evidence < NAME_MIN_COUNT (sparse)
+    build/name-allowlist.txt (one word per line, # comments) exempts words
+    from this policy entirely. Bonus-tier words are not policed.
   - each word is annotated with its stem bases (for the stem penalty),
     computed by simple suffix patterns only — NOT full lemmatization:
       * foo -> foos        (add s)
@@ -46,13 +57,18 @@ import sys
 
 from wordfreq import zipf_frequency
 
-DICT_VERSION = 2
+DICT_VERSION = 3
 FIND_ZIPF = 3.0
 BONUS_ZIPF = 2.0
 WORD_RE = re.compile(r"^[a-z]{4,12}$")
 
+NAME_REMOVE_RATIO = 0.95
+NAME_DEMOTE_RATIO = 0.90
+NAME_MIN_COUNT = 5
+
 HERE = pathlib.Path(__file__).resolve().parent
 SOURCE_WORDS = HERE / "words-enable.txt"
+SUBTLEX_TSV = HERE / "SUBTLEXus74286wordstextversion.tsv"
 OUT_DIR = HERE.parent / "dict"
 GAME_HTML = HERE.parent / "copia.html"
 
@@ -111,11 +127,64 @@ def pattern_bases(word: str, find_set: set) -> set:
     return bases
 
 
+def load_subtlex_case():
+    """word(lower) -> (FREQcount, FREQlow), summed over case variants."""
+    stats = {}
+    for line in SUBTLEX_TSV.read_text().split("\n")[1:]:
+        if not line.strip():
+            continue
+        p = line.split("\t")
+        w = p[0].lower()
+        t, l = int(p[1]), int(p[3])
+        t0, l0 = stats.get(w, (0, 0))
+        stats[w] = (t0 + t, l0 + l)
+    return stats
+
+
+def load_allowlist():
+    p = HERE / "name-allowlist.txt"
+    if not p.exists():
+        return set()
+    return {l.strip() for l in p.read_text().split("\n")
+            if l.strip() and not l.startswith("#")}
+
+
+def apply_name_policy(find_words):
+    """Split find_words into (keep, demote, remove) per the module docstring."""
+    case = load_subtlex_case()
+    allow = load_allowlist()
+    keep, demote, remove = [], [], []
+    for w in find_words:
+        if w in allow:
+            keep.append(w)
+            continue
+        st = case.get(w)
+        if st is None:                       # NO-EVIDENCE -> demote
+            demote.append(w)
+            continue
+        total, low = st
+        if total < NAME_MIN_COUNT:           # SPARSE -> leave alone
+            keep.append(w)
+            continue
+        ratio = 1 - low / total
+        if ratio >= NAME_REMOVE_RATIO:
+            remove.append(w)
+        elif ratio >= NAME_DEMOTE_RATIO:
+            demote.append(w)
+        else:
+            keep.append(w)
+    return keep, demote, remove
+
+
 def build():
     words = [w for w in SOURCE_WORDS.read_text().split("\n") if WORD_RE.match(w)]
     scored = sorted(((zipf(w), w) for w in words), key=lambda t: (-t[0], t[1]))
     find_words = [w for z, w in scored if z >= FIND_ZIPF]
     bonus_words = [w for z, w in scored if BONUS_ZIPF <= z < FIND_ZIPF]
+    find_words, demoted, removed = apply_name_policy(find_words)
+    # demoted words all have zipf >= FIND_ZIPF > every bonus word, so
+    # prepending keeps the bonus section in descending-frequency order
+    bonus_words = demoted + bonus_words
     find_set = set(find_words)
 
     def annotate(word: str) -> str:
@@ -138,6 +207,7 @@ def build():
     stems = sum(1 for l in lines if ":" in l)
     print(f"wrote {out}  find={len(find_words)} bonus={len(bonus_words)} "
           f"stem-annotated={stems}")
+    print(f"name policy: removed={len(removed)} demoted-to-bonus={len(demoted)}")
     return text
 
 
