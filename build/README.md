@@ -15,7 +15,7 @@ into `copia.html` by this build script.
   output (thresholds, source list, lemmatization, format).
 - Keep old `dict/copia-dict.v*.txt` files; each version is a permanent record
   of what boards of that era were generated from.
-- Bump `GEN_VERSION` in `copia.html` in the same commit — dictionary changes
+- Bump `GEN_VERSION` in `engine.js` in the same commit — dictionary changes
   reshuffle all board names.
 
 ## Sources

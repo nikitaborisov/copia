@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /* Board statistics probe.
  *
- * Extracts the game engine straight out of copia.html (dictionary, solver,
- * generator, scoring) so it always measures the CURRENT scoring — edit the
- * scoring in copia.html, rerun this, compare.
+ * Runs the real game engine (engine.js — dictionary, solver, generator,
+ * scoring) against the dictionary embedded in copia.html, so it always
+ * measures the CURRENT scoring — edit engine.js, rerun this, compare.
  *
  * Per board: find-word count, bonus count, generator score, histogram of
  * word lengths, histogram of rarity term (1..10, clamped), stem-penalty
@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
+const { SCORING, GEN_ITERS, GEN_VERSION, createEngine } = require('../engine.js');
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -28,42 +29,11 @@ const SIZE = opt('size', 4);
 const N = opt('boards', 20);
 const VERBOSE = args.includes('--verbose');
 
-/* ---- load engine from copia.html ---- */
+/* ---- dictionary comes from the artifact embedded in copia.html ---- */
 const html = fs.readFileSync(path.join(__dirname, '..', 'copia.html'), 'utf8');
 const dict = html.match(/<script id="dict-data" type="text\/plain">([\s\S]*?)<\/script>/)[1];
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-let code = scripts[scripts.length - 1][1];
-code = code.slice(0, code.indexOf('/* ================= game state & UI'));
-
-global.document = { getElementById: id => (id === 'dict-data' ? { textContent: dict } : undefined) };
-const engine = new Function(code + `
-  return {SCORING, COMMON, BONUS, RANK, STEM_BASES, GEN_ITERS, GEN_VERSION,
-          hashStr, mulberry32, normalizeName, randLetter,
-          neighborsTable, solve, seedBoard, scoreOf, wordScore, stemMult};`)();
-const { SCORING, COMMON, RANK, GEN_ITERS, GEN_VERSION,
-        hashStr, mulberry32, normalizeName, randLetter,
-        neighborsTable, solve, seedBoard, scoreOf, stemMult } = engine;
+const { COMMON, RANK, stemMult, generateBoardSync } = createEngine(dict);
 const FIND_N = COMMON.length;
-
-/* ---- synchronous generation (same algorithm as generateBoard) ---- */
-function genSync(n, name) {
-  const rng = mulberry32(hashStr(n + 'x' + n + ':' + normalizeName(name)));
-  const nbr = neighborsTable(n);
-  let board = seedBoard(n, rng);
-  let best = solve(board, nbr);
-  let bestScore = scoreOf(best);
-  for (let i = 0; i < GEN_ITERS[n]; i++) {
-    const trial = board.slice();
-    if (rng() < 0.7) trial[rng() * trial.length | 0] = randLetter(rng);
-    else {
-      const a = rng() * trial.length | 0, b = rng() * trial.length | 0;
-      [trial[a], trial[b]] = [trial[b], trial[a]];
-    }
-    const res = solve(trial, nbr), sc = scoreOf(res);
-    if (sc >= bestScore) { board = trial; best = res; bestScore = sc; }
-  }
-  return { board, best, bestScore };
-}
 
 /* ---- per-board stats (scoring functions/constants come from the engine) ---- */
 function boardStats(found) {
@@ -90,7 +60,7 @@ const all = [];
 const t0 = performance.now();
 for (let i = 1; i <= N; i++) {
   const name = 'probe ' + i;
-  const g = genSync(SIZE, name);
+  const g = generateBoardSync(SIZE, name);
   const s = boardStats(g.best);
   s.score = g.bestScore;
   all.push(s);

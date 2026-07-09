@@ -2,7 +2,7 @@
 	"name": "copia",
 	"private": true,
 	"scripts": {
-		"build": "mkdir -p out && cp copia.html out/index.html",
+		"build": "mkdir -p out && cp copia.html out/index.html && cp engine.js out/engine.js",
 		"deploy": "npm run build && wrangler deploy",
 		"dev": "npm run build && wrangler dev"
 	},

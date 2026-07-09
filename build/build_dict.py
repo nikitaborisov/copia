@@ -20,7 +20,7 @@ Generates the versioned word-list artifact embedded in copia.html:
     Only bases that are themselves in the find list are stored, since the
     in-game penalty only applies when the stem is on the same board.
 
-Output format (docs/parsing must stay in sync with copia.html):
+Output format (docs/parsing must stay in sync with engine.js):
   line 1: "copia-dict v<DICT_VERSION>"
   "#find" line, then find words in rank order
   "#bonus" line, then bonus words in rank order
@@ -30,7 +30,7 @@ Output format (docs/parsing must stay in sync with copia.html):
 VERSIONING: bump DICT_VERSION for ANY change to this script's output
 (thresholds, source list, lemmatization logic, format). Check the new
 artifact in as dict/copia-dict.v<N>.txt (keep old versions), inject it with
---inject, and bump GEN_VERSION in copia.html in the same commit — board
+--inject, and bump GEN_VERSION in engine.js in the same commit — board
 names reshuffle whenever the dictionary changes.
 
 Usage:
