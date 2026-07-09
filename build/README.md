@@ -24,3 +24,7 @@ into `copia.html` by this build script.
   package v4.1.0 (ENABLE with offensive words removed).
 - Frequency: `wordfreq` (zipf_frequency, English).
 - Stemming: simple suffix patterns only (see build_dict.py docstring).
+- `SUBTLEXus74286wordstextversion.tsv`: SUBTLEX-US word frequencies with case
+  counts (FREQcount/FREQlow), from crr.ugent.be — used by `find_names.py` to
+  detect proper-noun-polluted find-tier words (analysis only; free for
+  research use, Brysbaert & New 2009).
