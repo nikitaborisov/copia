@@ -7,7 +7,7 @@
  *
  * Per board: find-word count, bonus count, generator score, histogram of
  * word lengths, histogram of rarity term (1..10, clamped), stem-penalty
- * counts (1/8 direct, 1/4 variation). Aggregates mean ± sd over N boards.
+ * counts (pattern stems x0). Aggregates mean ± sd over N boards.
  *
  * Board names are fixed ("probe 1".."probe N") so different scoring variants
  * are compared on the same seeds.
@@ -40,7 +40,7 @@ function boardStats(found) {
   const words = found.common;
   const s = {
     words: words.size, bonus: found.bonus.size,
-    byLen: {}, byRarity: {}, stemDirect: 0, stemVariation: 0,
+    byLen: {}, byRarity: {}, stemPattern: 0,
   };
   for (const w of words) {
     s.byLen[w.length] = (s.byLen[w.length] || 0) + 1;
@@ -48,8 +48,7 @@ function boardStats(found) {
     const rb = Math.min(10, Math.max(1, Math.ceil(10 * RANK.get(w) / FIND_N)));
     s.byRarity[rb] = (s.byRarity[rb] || 0) + 1;
     const m = stemMult(w, words);
-    if (m === SCORING.STEM_DIRECT) s.stemDirect++;
-    else if (m === SCORING.STEM_VARIATION) s.stemVariation++;
+    if (m === SCORING.STEM_PATTERN) s.stemPattern++;
   }
   return s;
 }
@@ -65,7 +64,7 @@ for (let i = 1; i <= N; i++) {
   s.score = g.bestScore;
   all.push(s);
   if (VERBOSE) console.log(`  ${name}: ${s.words} words, score ${s.score.toFixed(0)}, ` +
-    `stem ${s.stemDirect}+${s.stemVariation}, board ${g.board.join('')}`);
+    `stem ${s.stemPattern}, board ${g.board.join('')}`);
 }
 console.log(`generated in ${((performance.now() - t0) / 1000).toFixed(1)}s\n`);
 
@@ -77,9 +76,7 @@ const col = (get) => all.map(get);
 console.log(`find words      ${fmt(col(s => s.words))}`);
 console.log(`bonus words     ${fmt(col(s => s.bonus))}`);
 console.log(`gen score       ${fmt(col(s => s.score))}`);
-console.log(`stem direct (x${SCORING.STEM_DIRECT})     ${fmt(col(s => s.stemDirect))}`);
-console.log(`stem variation (x${SCORING.STEM_VARIATION})  ${fmt(col(s => s.stemVariation))}`);
-console.log(`stem any        ${fmt(col(s => s.stemDirect + s.stemVariation))}`);
+console.log(`stem pattern (x${SCORING.STEM_PATTERN})   ${fmt(col(s => s.stemPattern))}`);
 
 console.log('\nlength histogram (mean words per board)');
 const lens = [...new Set(all.flatMap(s => Object.keys(s.byLen)))].map(Number).sort((a, b) => a - b);

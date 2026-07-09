@@ -23,5 +23,4 @@ into `copia.html` by this build script.
 - `words-enable.txt`: the ENABLE word list as shipped in the `word-list` npm
   package v4.1.0 (ENABLE with offensive words removed).
 - Frequency: `wordfreq` (zipf_frequency, English).
-- Lemmatization: `lemminflect` (see build_dict.py docstring for the stem
-  policy and false-positive gating).
+- Stemming: simple suffix patterns only (see build_dict.py docstring).

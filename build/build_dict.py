@@ -9,14 +9,15 @@ Generates the versioned word-list artifact embedded in copia.html:
   - words are ranked in descending frequency (ties broken alphabetically)
     across both tiers; rank feeds the in-game rarity score
   - each word is annotated with its stem bases (for the stem penalty),
-    computed by real lemmatization (lemminflect), NOT suffix heuristics:
-      * inflectional forms (rains->rain, buries->bury, mice->mouse) come
-        straight from lemminflect
-      * derivational -er/-r(+s) agent nouns (singer->sing) and words unknown
-        to lemminflect (motes->mote) go through suffix rules gated by a
-        frequency sanity check: the base must be MORE frequent than the
-        derived form. This is what blocks false positives like brand->bran,
-        corner->corn, beard->bear.
+    computed by simple suffix patterns only — NOT full lemmatization:
+      * foo -> foos        (add s)
+      * foo -> fooed       (add ed)
+      * bare -> bared      (replace trailing e with d)
+      * bar -> barred      (double last letter + ed)
+      * bar -> baring      (add ing)
+      * bar -> barring     (double last letter + ing)
+      * bare -> baring     (replace trailing e with ing)
+    Other inflections (bury->buries, mice->mouse, etc.) are not stemmed.
     Only bases that are themselves in the find list are stored, since the
     in-game penalty only applies when the stem is on the same board.
 
@@ -24,11 +25,10 @@ Output format (docs/parsing must stay in sync with engine.js):
   line 1: "copia-dict v<DICT_VERSION>"
   "#find" line, then find words in rank order
   "#bonus" line, then bonus words in rank order
-  each word line: "word" or "word:base1,base2" (bases sorted: prefix bases
-  first — the game maps prefix bases to the 1/8 penalty, others to 1/4)
+  each word line: "word" or "word:base1,base2" (bases alphabetically)
 
 VERSIONING: bump DICT_VERSION for ANY change to this script's output
-(thresholds, source list, lemmatization logic, format). Check the new
+(thresholds, source list, stemming logic, format). Check the new
 artifact in as dict/copia-dict.v<N>.txt (keep old versions), inject it with
 --inject, and bump GEN_VERSION in engine.js in the same commit — board
 names reshuffle whenever the dictionary changes.
@@ -44,10 +44,9 @@ import pathlib
 import re
 import sys
 
-from lemminflect import getAllLemmas
 from wordfreq import zipf_frequency
 
-DICT_VERSION = 1
+DICT_VERSION = 2
 FIND_ZIPF = 3.0
 BONUS_ZIPF = 2.0
 WORD_RE = re.compile(r"^[a-z]{4,12}$")
@@ -57,57 +56,59 @@ SOURCE_WORDS = HERE / "words-enable.txt"
 OUT_DIR = HERE.parent / "dict"
 GAME_HTML = HERE.parent / "copia.html"
 
-AGENT_SUFFIXES = ["ers", "rs", "er", "r"]
-
 
 def zipf(word: str) -> float:
     return zipf_frequency(word, "en")
 
 
-def lemma_bases(word: str, find_set: set) -> set:
-    """True inflectional bases from lemminflect (rains->rain, mice->mouse)."""
+def pattern_bases(word: str, find_set: set) -> set:
+    """Simple suffix-pattern bases only (see module docstring)."""
     bases = set()
-    for lemmas in getAllLemmas(word).values():
-        for lemma in lemmas:
-            if lemma != word and lemma in find_set:
-                bases.add(lemma)
-    return bases
-
-
-def agent_noun_bases(word: str, find_set: set, z_word: float) -> set:
-    """Derivational -er/-r agent nouns: singer->sing, mover->move.
-    Gated: base must be a known VERB lemma and more frequent than the word."""
-    bases = set()
-    for suf in AGENT_SUFFIXES:
-        if not word.endswith(suf) or len(word) - len(suf) < 4:
-            continue
-        base = word[: len(word) - len(suf)]
-        for cand in {base, base + "e"}:
-            if cand in find_set and cand != word and zipf(cand) > z_word:
-                if "VERB" in getAllLemmas(cand):
-                    bases.add(cand)
-    return bases
-
-
-def fallback_bases(word: str, find_set: set, z_word: float) -> set:
-    """Suffix heuristics for words lemminflect does not know (motes->mote),
-    frequency-gated so brand->bran style accidents stay out."""
-    cands = set()
     n = len(word)
-    for suf in ["s", "es", "ed", "d", "ing", "er", "r", "ers", "rs", "est", "st"]:
-        if word.endswith(suf) and n - len(suf) >= 4:
-            cands.add(word[: n - len(suf)])
-    for suf, rep in [("ies", "y"), ("ied", "y"), ("ier", "y"), ("iest", "y")]:
-        if word.endswith(suf) and n - len(suf) >= 3:
-            cands.add(word[: n - len(suf)] + rep)
+
+    # foo -> foos (add s)
+    if word.endswith("s") and n > 4:
+        b = word[:-1]
+        if b in find_set:
+            bases.add(b)
+
+    # foo -> fooed (add ed)
+    if word.endswith("ed") and n > 5:
+        b = word[:-2]
+        if b in find_set and word == b + "ed":
+            bases.add(b)
+
+    # bare -> bared (add d when base ends in e)
+    if word.endswith("d") and n >= 5:
+        b = word[:-1]
+        if b in find_set and b.endswith("e") and word == b + "d":
+            bases.add(b)
+
+    # bar -> barred (double last letter + ed)
+    if word.endswith("ed") and n >= 7:
+        b = word[:-3]
+        if len(b) >= 4 and b in find_set and word == b + b[-1] + "ed":
+            bases.add(b)
+
+    # bar -> baring (add ing)
+    if word.endswith("ing") and n >= 7:
+        b = word[:-3]
+        if b in find_set and word == b + "ing":
+            bases.add(b)
+
+    # bar -> barring (double last letter + ing)
+    if word.endswith("ing") and n >= 8:
+        b = word[:-4]
+        if len(b) >= 4 and b in find_set and word == b + b[-1] + "ing":
+            bases.add(b)
+
+    # bare -> baring (replace trailing e with ing)
     if word.endswith("ing") and n >= 6:
-        cands.add(word[:-3] + "e")
-    for suf in ["ed", "ing", "er", "est"]:
-        if word.endswith(suf):
-            b = word[: n - len(suf)]
-            if len(b) >= 5 and b[-1] == b[-2]:
-                cands.add(b[:-1])
-    return {b for b in cands if b != word and b in find_set and zipf(b) > z_word}
+        b = word[:-3] + "e"
+        if b in find_set and word == b[:-1] + "ing":
+            bases.add(b)
+
+    return bases
 
 
 def build():
@@ -118,15 +119,10 @@ def build():
     find_set = set(find_words)
 
     def annotate(word: str) -> str:
-        z_word = zipf(word)
-        bases = lemma_bases(word, find_set)
-        bases |= agent_noun_bases(word, find_set, z_word)
-        if not getAllLemmas(word):
-            bases |= fallback_bases(word, find_set, z_word)
+        bases = pattern_bases(word, find_set)
         if not bases:
             return word
-        ordered = sorted(bases, key=lambda b: (not word.startswith(b), b))
-        return word + ":" + ",".join(ordered)
+        return word + ":" + ",".join(sorted(bases))
 
     lines = [f"copia-dict v{DICT_VERSION}", "#find"]
     lines += [annotate(w) for w in find_words]
