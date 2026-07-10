@@ -57,7 +57,7 @@ import sys
 
 from wordfreq import zipf_frequency
 
-DICT_VERSION = 3
+DICT_VERSION = 4
 FIND_ZIPF = 3.0
 BONUS_ZIPF = 2.0
 WORD_RE = re.compile(r"^[a-z]{4,12}$")
@@ -185,6 +185,33 @@ def build():
     # demoted words all have zipf >= FIND_ZIPF > every bonus word, so
     # prepending keeps the bonus section in descending-frequency order
     bonus_words = demoted + bonus_words
+
+    # ---- stem-family promotion ----
+    # If a find-list word is a suffix extension of a word sitting in the bonus
+    # tier — whether naturally rarer (oriented 4.1 vs orient 3.4-demoted) or
+    # pushed there by the name policy — players who see the base as a mere
+    # bonus word stop hunting its extensions. Promote the base into the find
+    # list; the extension then scores x0 whenever the base is on the same
+    # board (and the UI drops it), by the existing stem mechanics. Iterated to
+    # a fixpoint so promotion chains resolve. Promoted words are appended
+    # after the natural find words in their own descending-frequency order,
+    # so the find section stays two sorted runs (documented format quirk).
+    bonus_set = set(bonus_words)
+    promoted = []
+    frontier = list(find_words)
+    while frontier:
+        nxt = []
+        for w in frontier:
+            for b in pattern_bases(w, bonus_set):
+                bonus_set.discard(b)
+                promoted.append(b)
+                nxt.append(b)
+        frontier = nxt
+    if promoted:
+        promoted.sort(key=lambda w: (-zipf(w), w))
+        find_words = find_words + promoted
+        bonus_words = [w for w in bonus_words if w in bonus_set]
+
     find_set = set(find_words)
 
     def annotate(word: str) -> str:
@@ -207,7 +234,8 @@ def build():
     stems = sum(1 for l in lines if ":" in l)
     print(f"wrote {out}  find={len(find_words)} bonus={len(bonus_words)} "
           f"stem-annotated={stems}")
-    print(f"name policy: removed={len(removed)} demoted-to-bonus={len(demoted)}")
+    print(f"name policy: removed={len(removed)} demoted-to-bonus={len(demoted)}; "
+          f"stem promotion: {len(promoted)} bases promoted to find list")
     return text
 
 
