@@ -81,6 +81,24 @@ function neighborsTable(n){
   }
   return tbl;
 }
+// ALL self-avoiding placements of `word` on `board`, up to `cap` (default 64),
+// in deterministic DFS order. Used by the hint optimizer; not by generation.
+function findAllPaths(board, nbr, word, cap){
+  cap = cap || 64;
+  const out = [];
+  const used = new Uint8Array(board.length);
+  const path = [];
+  function dfs(i,k){
+    if(out.length>=cap) return;
+    if(board[i]!==word[k]) return;
+    used[i]=1; path.push(i);
+    if(k===word.length-1) out.push(path.slice());
+    else for(const j of nbr[i]) if(!used[j]) dfs(j,k+1);
+    used[i]=0; path.pop();
+  }
+  for(let i=0;i<board.length;i++) dfs(i,0);
+  return out;
+}
 // find one path spelling `word` on `board`, or null
 function findPath(board, nbr, word){
   const used = new Uint8Array(board.length);
@@ -323,7 +341,7 @@ function createEngine(dictText){
 /* ================= exports ================= */
 const api = {SCORING, GEN_VERSION, GEN_ITERS,
              hashStr, mulberry32, normalizeName, randomName,
-             neighborsTable, findPath, createEngine};
+             neighborsTable, findPath, findAllPaths, createEngine};
 if(typeof module!=='undefined' && module.exports) module.exports = api;
 else global.CopiaEngine = api;
 })(globalThis);
