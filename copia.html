@@ -71,6 +71,11 @@
   #scoreBarWrap{background:var(--panel2); border-radius:8px; height:8px; overflow:hidden; margin:0 0 4px;}
   #scoreBar{height:100%; width:0%; background:linear-gradient(90deg,#8a5a10,var(--bonus)); transition:width .3s;}
   #progressText{font-size:14px; color:var(--dim); margin-bottom:10px;}
+  #wordTabs{display:flex; gap:6px; align-items:center; margin:0 0 8px;}
+  #wordTabs button{font-size:12px; padding:5px 10px;}
+  #wordTabs .tabBtn.active{background:var(--tile-sel); border-color:var(--accent);}
+  #wordTabs .wtspacer{flex:1;}
+  .dimNote{color:var(--dim); font-size:13px; padding:6px 0;}
   details{margin:6px 0; background:var(--panel2); border-radius:8px; padding:6px 10px;}
   summary{cursor:pointer; font-size:14px; font-weight:600; padding:4px 0;}
   summary .cnt{color:var(--dim); font-weight:400;}
@@ -146,6 +151,12 @@
       <div id="progressBarWrap"><div id="progressBar"></div></div>
       <div id="scoreBarWrap"><div id="scoreBar"></div></div>
       <div id="progressText"></div>
+      <div id="wordTabs">
+        <button class="tabBtn active" data-tab="len">By length</button>
+        <button class="tabBtn" data-tab="az">Found A–Z</button>
+        <span class="wtspacer"></span>
+        <button id="unfoundBtn">Show unfound</button>
+      </div>
       <div id="wordGroups"></div>
       <div id="bonusSection">
         <h3>Bonus words: <span id="bonusCount">0</span></h3>
@@ -51654,28 +51665,59 @@ window.addEventListener('keydown',e=>{
 });
 
 /* ---- word list panel ---- */
+/* word list view state: tab, unfound visibility, and per-length open state
+   (openLens survives re-renders so entering a word never collapses groups;
+   cleared per board in newGame) */
+let wordsTab='len', showUnfound=false;
+const openLens=new Map();
+els('wordGroups').addEventListener('toggle',e=>{
+  const d=e.target;
+  if(d.tagName==='DETAILS' && d.dataset.len) openLens.set(+d.dataset.len, d.open);
+},true);
+document.querySelectorAll('#wordTabs .tabBtn').forEach(b=>b.addEventListener('click',e=>{
+  wordsTab=b.dataset.tab;
+  document.querySelectorAll('#wordTabs .tabBtn').forEach(x=>x.classList.toggle('active',x===b));
+  e.currentTarget.blur();
+  renderWords();
+}));
+els('unfoundBtn').addEventListener('click',e=>{
+  showUnfound=!showUnfound;
+  els('unfoundBtn').textContent=showUnfound?'Hide unfound':'Show unfound';
+  e.currentTarget.blur();
+  renderWords();
+});
+function foundChip(w){
+  return `<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${G.scores.get(w)||0}">${w}</span>`;
+}
 function renderWords(){
-  const byLen = new Map();
-  for(const w of G.required){
-    if(!byLen.has(w.length)) byLen.set(w.length,{all:[],found:0});
-    byLen.get(w.length).all.push(w);
-  }
-  const lens=[...byLen.keys()].sort((a,b)=>a-b);
-  let html='';
-  for(const L of lens){
-    const g=byLen.get(L);
-    g.all.sort();
-    const foundHere=g.all.filter(w=>G.foundReq.has(w));
-    const open = L<=5 ? ' open' : '';
-    html+=`<details${open}><summary>${L} letters <span class="cnt ${foundHere.length===g.all.length?'done':''}">${foundHere.length} / ${g.all.length}</span></summary><div class="wordChips">`;
-    for(const w of g.all){
-      if(G.foundReq.has(w)) html+=`<span class="chip" style="color:${scoreColor(G.scores.get(w)/G.maxScore)}" title="+${G.scores.get(w)}">${w}</span>`;
-      else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w)}">${w}</span>`;
-      else html+=`<span class="chip blank">${'•'.repeat(w.length)}</span>`;
+  if(wordsTab==='az'){
+    const found=[...G.foundReq].sort();
+    els('wordGroups').innerHTML = found.length
+      ? `<div class="wordChips">${found.map(foundChip).join('')}</div>`
+      : `<div class="dimNote">No words found yet.</div>`;
+  }else{
+    const byLen = new Map();
+    for(const w of G.required){
+      if(!byLen.has(w.length)) byLen.set(w.length,{all:[]});
+      byLen.get(w.length).all.push(w);
     }
-    html+='</div></details>';
+    const lens=[...byLen.keys()].sort((a,b)=>b-a);   // long -> short
+    let html='';
+    for(const L of lens){
+      const g=byLen.get(L);
+      g.all.sort();
+      const foundHere=g.all.filter(w=>G.foundReq.has(w));
+      const open = openLens.has(L) ? openLens.get(L) : L<=5;
+      html+=`<details${open?' open':''} data-len="${L}"><summary>${L} letters <span class="cnt ${foundHere.length===g.all.length?'done':''}">${foundHere.length} / ${g.all.length}</span></summary><div class="wordChips">`;
+      for(const w of g.all){
+        if(G.foundReq.has(w)) html+=foundChip(w);
+        else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w)}">${w}</span>`;
+        else if(showUnfound) html+=`<span class="chip blank">${'•'.repeat(w.length)}</span>`;
+      }
+      html+='</div></details>';
+    }
+    els('wordGroups').innerHTML=html;
   }
-  els('wordGroups').innerHTML=html;
   const total=G.required.size, found=G.foundReq.size;
   let fs=0; for(const w of G.foundReq) fs+=G.scores.get(w)||0;
   els('progressBar').style.width=(total?100*found/total:0)+'%';
@@ -51756,6 +51798,7 @@ function newGame(name){
   location.hash=G.n+'/'+encodeURIComponent(G.name.replace(/ /g,'-'));
   G.ready=false; G.revealed=false;
   G.foundReq.clear(); G.foundBonus.clear();
+  openLens.clear();
   clearSelection();
   G.board=Array(G.n*G.n).fill('·');
   renderGrid();
