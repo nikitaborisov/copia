@@ -43,12 +43,20 @@
   #currentWord.ext{color:var(--dim); text-decoration:line-through;}
   #gridWrap{position:relative; touch-action:none;}
   #grid{display:grid; gap:8px;}
-  .tile{width:var(--ts); height:var(--ts); background:var(--tile); border:2px solid var(--tile-edge);
+  .tile{position:relative; width:var(--ts); height:var(--ts); background:var(--tile); border:2px solid var(--tile-edge);
     border-radius:10px; display:flex; align-items:center; justify-content:center;
     font-size:calc(var(--ts)*.48); font-weight:700; text-transform:uppercase; user-select:none;
     cursor:pointer; transition:background .08s,transform .08s;}
   .tile.sel{background:var(--tile-sel); border-color:var(--accent); transform:scale(1.06);}
   .tile.hint{background:var(--tile-path); border-color:var(--accent);}
+  /* board hints: corner count = words starting here; bg heat = words through here */
+  .tile .startN{position:absolute; top:2px; left:5px; font-size:12px; font-weight:600;
+    color:var(--accent); line-height:1; pointer-events:none;}
+  .tile .startN.zero{color:var(--dim); opacity:.55;}
+  #grid.hints .tile{background:var(--hintbg, var(--tile));}
+  #grid.hints .tile.sel{background:var(--tile-sel);}
+  #grid.hints .tile.hint{background:var(--tile-path);}
+  #hintBtn{font-size:13px; padding:6px 12px;}
   #genOverlay{position:absolute; inset:0; background:rgba(28,9,12,.88); border-radius:12px;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
     font-size:15px; color:var(--dim); z-index:5;}
@@ -126,6 +134,7 @@
         </div>
       </div>
       <div id="boardStats"></div>
+      <button id="hintBtn">Show hints</button>
       <div id="loadRow">
         <input type="text" id="boardName" placeholder="e.g. curious elephant" autocomplete="off">
         <button id="loadBtn">Load board</button>
@@ -51395,7 +51404,7 @@ const G = {
   required:new Set(), bonus:new Set(), stemExt:new Set(),
   foundReq:new Set(), foundBonus:new Set(),
   scores:new Map(), totalScore:0, maxScore:1,
-  sel:[], typing:'', revealed:false, ready:false,
+  sel:[], typing:'', revealed:false, ready:false, hints:false,
 };
 
 /* Rarity kudos: tiered by effective-rank position within the find list.
@@ -51448,7 +51457,51 @@ function renderGrid(){
     linesSvg.setAttribute('width',gridWrap.clientWidth);
     linesSvg.setAttribute('height',gridWrap.clientHeight);
   });
+  renderHints();
 }
+
+/* ---- board hints ----
+   For every not-yet-found word on the score list (find list only — stem
+   extensions and bonus words never count), take ONE arbitrary placement
+   (findPath is deterministic, so it's stable) and tally:
+     starts[i]  = words whose placement begins at tile i  -> corner number
+     through[i] = words whose placement crosses tile i    -> log-scale heat bg */
+function computeHints(){
+  const N=G.board.length;
+  const starts=new Array(N).fill(0), through=new Array(N).fill(0);
+  for(const w of G.required){
+    if(G.foundReq.has(w)) continue;
+    const p=findPath(G.board,G.nbr,w);
+    if(!p) continue;
+    starts[p[0]]++;
+    for(const i of p) through[i]++;
+  }
+  return {starts,through};
+}
+function renderHints(){
+  const on = G.hints && G.ready;
+  grid.classList.toggle('hints', on);
+  const tiles=[...grid.children];
+  if(!on){
+    tiles.forEach(t=>{ t.style.removeProperty('--hintbg'); const s=t.querySelector('.startN'); if(s)s.remove(); });
+    return;
+  }
+  const {starts,through}=computeHints();
+  const max=Math.max(1,...through);
+  tiles.forEach((t,i)=>{
+    const v=Math.log(1+through[i])/Math.log(1+max);
+    t.style.setProperty('--hintbg', `hsl(352 ${Math.round(30+45*v)}% ${Math.round(9+30*v)}%)`);
+    let s=t.querySelector('.startN');
+    if(!s){ s=document.createElement('span'); s.className='startN'; t.appendChild(s); }
+    s.textContent=starts[i];
+    s.classList.toggle('zero', starts[i]===0);
+  });
+}
+els('hintBtn').addEventListener('click',()=>{
+  G.hints=!G.hints;
+  els('hintBtn').textContent=G.hints?'Hide hints':'Show hints';
+  renderHints();
+});
 
 function setFeedback(msg, cls){
   feedbackEl.textContent = msg||'';
@@ -51505,7 +51558,7 @@ function submitWord(word, viaPath){
   }else{
     setFeedback('Not in word list','bad');
   }
-  clearSelection(); renderWords(); saveProgress();
+  clearSelection(); renderWords(); renderHints(); saveProgress();
 }
 
 /* ---- pointer input ---- */
