@@ -51497,10 +51497,11 @@ function renderHints(){
     s.classList.toggle('zero', starts[i]===0);
   });
 }
-els('hintBtn').addEventListener('click',()=>{
+els('hintBtn').addEventListener('click',e=>{
   G.hints=!G.hints;
   els('hintBtn').textContent=G.hints?'Hide hints':'Show hints';
   renderHints();
+  e.currentTarget.blur();   // else Enter (submit word) re-clicks the focused button
 });
 
 function setFeedback(msg, cls){
@@ -51748,14 +51749,15 @@ function parseHash(){
   if(!m) return null;
   return {n:+m[1], name:normalizeName(decodeURIComponent(m[2]))};
 }
-els('newBtn').addEventListener('click',()=>newGame());
-els('sizeSel').addEventListener('change',()=>newGame(G.name));
+els('newBtn').addEventListener('click',e=>{ e.currentTarget.blur(); newGame(); });
+els('sizeSel').addEventListener('change',e=>{ e.currentTarget.blur(); newGame(G.name); });
 els('loadBtn').addEventListener('click',()=>{
   const v=els('boardName').value;
   if(v.trim()){ els('boardName').value=''; els('boardName').blur(); newGame(v); }
 });
 els('boardName').addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter') els('loadBtn').click(); });
-els('revealBtn').addEventListener('click',()=>{
+els('revealBtn').addEventListener('click',e=>{
+  e.currentTarget.blur();
   if(G.revealed)return;
   if(confirm('Reveal all remaining words? This ends the challenge for this board.')){
     G.revealed=true; renderWords(); saveProgress();
