@@ -23,15 +23,15 @@
      ((len-3)^LENGTH_EXP + log(rank)/log(RARITY_REF)*RARITY_SCALE) * stem */
 const SCORING = {
   LENGTH_EXP: 1.5,       // length term = (len-3)^LENGTH_EXP
-  RARITY_SCALE: 20,      // rarity term = log(rank)/log(RARITY_REF)*RARITY_SCALE
+  RARITY_SCALE: 15,      // rarity term = log(rank)/log(RARITY_REF)*RARITY_SCALE
   RARITY_REF: 10000,
   STEM_PATTERN: 0,       // simple suffix pattern (s/ed/d/ing); only when base on board
   /* climb objective = scoreOf x evenness^EVENNESS_EXP x wordcount^WORDCOUNT_EXP.
      Evenness alone is gamed by dropping words (a sparse board spreads
      trivially), so WORDCOUNT_EXP must rise with EVENNESS_EXP to hold the
      word count. 0/0 = plain scoreOf. */
-  EVENNESS_EXP: 8,
-  WORDCOUNT_EXP: 1,
+  EVENNESS_EXP: 3,
+  WORDCOUNT_EXP: 0,
 };
 
 /* Deterministic generation: the board name seeds a PRNG and the hill climb
@@ -44,7 +44,7 @@ const SCORING = {
    or the mutation logic in startClimb. Saved games record the version they
    were played on; saves from other versions are shown greyed out and are not
    restored. */
-const GEN_VERSION = 9;
+const GEN_VERSION = 10;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 
 /* ================= seeded RNG ================= */
