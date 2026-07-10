@@ -26,6 +26,12 @@ const SCORING = {
   RARITY_SCALE: 20,      // rarity term = log(rank)/log(RARITY_REF)*RARITY_SCALE
   RARITY_REF: 10000,
   STEM_PATTERN: 0,       // simple suffix pattern (s/ed/d/ing); only when base on board
+  /* climb objective = scoreOf x evenness^EVENNESS_EXP x wordcount^WORDCOUNT_EXP.
+     Evenness alone is gamed by dropping words (a sparse board spreads
+     trivially), so WORDCOUNT_EXP must rise with EVENNESS_EXP to hold the
+     word count. 0/0 = plain scoreOf. */
+  EVENNESS_EXP: 8,
+  WORDCOUNT_EXP: 1,
 };
 
 /* Deterministic generation: the board name seeds a PRNG and the hill climb
@@ -38,7 +44,7 @@ const SCORING = {
    or the mutation logic in startClimb. Saved games record the version they
    were played on; saves from other versions are shown greyed out and are not
    restored. */
-const GEN_VERSION = 8;
+const GEN_VERSION = 9;
 const GEN_ITERS = {3:5200, 4:3600, 5:1500};
 
 /* ================= seeded RNG ================= */
@@ -238,25 +244,56 @@ function createEngine(dictText){
     return out;
   }
 
-  /* ---- solver: all findable words, as {common:Set, bonus:Set} ---- */
+  /* ---- solver: all findable words, as {common:Set, bonus:Set, through} ----
+     `through[i]` counts find-list words whose FIRST-discovered placement (the
+     deterministic DFS-order path — the same one-pass placement the hint
+     system starts from) crosses tile i. Tallied only on first discovery, so
+     each word contributes exactly one placement. Feeds the evenness term of
+     the climb objective. */
   function solve(board, nbr){
     const found = {common:new Set(), bonus:new Set()};
     const N = board.length;
+    const through = new Uint16Array(N);
     const used = new Uint8Array(N);
-    const path = [];
+    const path = [], tiles = [];
     function dfs(i, node){
       const nx = node.c.get(board[i]);
       if(!nx) return;
-      used[i]=1; path.push(board[i]);
+      used[i]=1; path.push(board[i]); tiles.push(i);
       if(path.length>=4 && nx.f){
         const w = path.join('');
-        if(nx.f&1) found.common.add(w); else found.bonus.add(w);
+        if(nx.f&1){
+          if(!found.common.has(w)){
+            found.common.add(w);
+            for(const t of tiles) through[t]++;
+          }
+        }else found.bonus.add(w);
       }
       for(const j of nbr[i]) if(!used[j]) dfs(j,nx);
-      used[i]=0; path.pop();
+      used[i]=0; path.pop(); tiles.pop();
     }
     for(let i=0;i<N;i++) dfs(i,TRIE);
+    found.through = through;
     return found;
+  }
+
+  /* Evenness of the word distribution across tiles: normalized effective
+     tile count (inverse Herfindahl), (sum c)^2 / (N * sum c^2), in (0,1].
+     1 = every tile carries equal load; small = words crowd few tiles. */
+  function evenness(through){
+    let sum=0, sumsq=0;
+    for(const c of through){ sum+=c; sumsq+=c*c; }
+    if(!sum) return 1;
+    return (sum*sum)/(through.length*sumsq);
+  }
+  /* Full climb objective: word scores x evenness pressure x word-count
+     pressure (multi-objective; see SCORING comment). With both exponents 0
+     this is exactly scoreOf. */
+  function climbScore(found){
+    let s = scoreOf(found);
+    if(SCORING.EVENNESS_EXP) s *= Math.pow(evenness(found.through), SCORING.EVENNESS_EXP);
+    if(SCORING.WORDCOUNT_EXP) s *= Math.pow(found.common.size, SCORING.WORDCOUNT_EXP);
+    return s;
   }
 
   /* ---- board generator (hill climbing) ---- */
@@ -293,7 +330,7 @@ function createEngine(dictText){
     const g = {nbr, total:GEN_ITERS[n], iter:0};
     g.board = seedBoard(n, rng);
     g.best = solve(g.board, nbr);
-    g.bestScore = scoreOf(g.best);
+    g.bestScore = climbScore(g.best);
     g.step = ()=>{
       g.iter++;
       const trial = g.board.slice();
@@ -304,7 +341,7 @@ function createEngine(dictText){
         [trial[a],trial[b]]=[trial[b],trial[a]];
       }
       const res = solve(trial,nbr);
-      const sc = scoreOf(res);
+      const sc = climbScore(res);
       if(sc>=g.bestScore){
         g.board=trial; g.best=res; g.bestScore=sc;
       }
@@ -333,6 +370,7 @@ function createEngine(dictText){
   return {
     DICT_VERSION, COMMON, BONUS, RANK, EFF_RANK, STEM_BASES,
     wordScore, lengthScore, rarityScore, stemMult, scoreOf, stemExtensions,
+    evenness, climbScore,
     solve, seedBoard, randLetter,
     generateBoard, generateBoardSync,
   };
