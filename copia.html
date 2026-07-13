@@ -51687,10 +51687,18 @@ els('unfoundBtn').addEventListener('click',e=>{
   e.currentTarget.blur();
   renderWords();
 });
+/* debug: chip tooltips show the current personal-generation weight for the
+   word (from live save history), e.g. "+16 × 75%"; omitted when unpenalized */
+let pweights=new Map();
+function chipTitle(w){
+  const wt=pweights.get(w);
+  return '+'+(G.scores.get(w)||0)+(wt!==undefined?' × '+Math.round(wt*100)+'%':'');
+}
 function foundChip(w){
-  return `<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${G.scores.get(w)||0}">${w}</span>`;
+  return `<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="${chipTitle(w)}">${w}</span>`;
 }
 function renderWords(){
+  pweights=personalWeights();
   if(wordsTab==='az'){
     const found=[...G.foundReq].sort();
     els('wordGroups').innerHTML = found.length
@@ -51712,7 +51720,7 @@ function renderWords(){
       html+=`<details${open?' open':''} data-len="${L}"><summary>${L} letters <span class="cnt ${foundHere.length===g.all.length?'done':''}">${foundHere.length} / ${g.all.length}</span></summary><div class="wordChips">`;
       for(const w of g.all){
         if(G.foundReq.has(w)) html+=foundChip(w);
-        else if(G.revealed) html+=`<span class="chip revealed" title="+${G.scores.get(w)}">${w}</span>`;
+        else if(G.revealed) html+=`<span class="chip revealed" title="${chipTitle(w)}">${w}</span>`;
         else if(showUnfound) html+=`<span class="chip blank">${'•'.repeat(w.length)}</span>`;
       }
       html+='</div></details>';
@@ -51725,7 +51733,7 @@ function renderWords(){
   els('scoreBar').style.width=(G.totalScore?100*fs/G.totalScore:0)+'%';
   els('progressText').textContent=`${found} of ${total} words · ${Math.round(fs)} of ${Math.round(G.totalScore)} pts`;
   els('bonusCount').textContent=G.foundBonus.size;
-  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(w=>`<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="+${G.scores.get(w)||0}">${w}</span>`).join('');
+  els('bonusChips').innerHTML=[...G.foundBonus].sort().map(foundChip).join('');
   els('winBanner').style.display = (total&&found===total)?'block':'none';
 }
 
