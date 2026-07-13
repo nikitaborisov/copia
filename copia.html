@@ -51797,7 +51797,7 @@ els('savesList').addEventListener('click',e=>{
    Words found recently (per saved games in localStorage) weigh less during
    generation, so the climb prefers boards full of words you haven't seen:
    penalty 90% if found within a day, exponential decay to 50% at 7 days
-   (p = 0.9 * (5/9)^((d-1)/6)), ignored past 14 days; weight = 1-p. Play scoring
+   (p = 0.9 * (5/9)^((d-1)/6)), ignored past 28 days (~6% there); weight = 1-p. Play scoring
    is NOT affected — the penalty only shapes which board gets generated.
    History-dependent, so these boards can't be regenerated from their name:
    saves store the board letters and resume adopts them directly. */
@@ -51810,7 +51810,7 @@ function personalWeights(){
   const now=Date.now(), weights=new Map();
   for(const [w,ts] of lastFound){
     const d=(now-ts)/86400000;
-    if(d>14) continue;
+    if(d>28) continue;
     const p = d<=1 ? 0.9 : 0.9*Math.pow(5/9,(d-1)/6);
     weights.set(w, 1-p);
   }
