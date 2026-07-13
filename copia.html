@@ -51414,7 +51414,7 @@ const grid=els('grid'), gridWrap=els('gridWrap'), overlay=els('genOverlay'),
 const G = {
   n:4, name:'', personal:false, board:[], nbr:null,
   required:new Set(), bonus:new Set(), stemExt:new Set(),
-  foundReq:new Set(), foundBonus:new Set(),
+  foundReq:new Set(), foundBonus:new Set(), foundTs:new Map(),
   scores:new Map(), totalScore:0, maxScore:1,
   sel:[], typing:'', revealed:false, ready:false, hints:false,
 };
@@ -51599,10 +51599,12 @@ function submitWord(word, viaPath){
     setFeedback(word.toUpperCase()+(base?' extends '+base.toUpperCase():' is a stem extension')+' — worth 0 pts','ext');
   }else if(G.required.has(word)){
     G.foundReq.add(word);
+    G.foundTs.set(word, Date.now());
     const k=kudos(word);
     setFeedback('✓ '+word.toUpperCase()+'  +'+G.scores.get(word)+(k?'  ·  '+k[0]:''), k?k[1]:'good');
   }else if(G.bonus.has(word)){
     G.foundBonus.add(word);
+    G.foundTs.set(word, Date.now());
     const k=kudos(word);
     setFeedback('★ Bonus: '+word.toUpperCase()+'  +'+G.scores.get(word)+(k?'  ·  '+k[0]:''), k?k[1]:'bonus');
   }else{
@@ -51698,7 +51700,7 @@ function foundChip(w){
   return `<span class="chip" style="color:${scoreColor((G.scores.get(w)||0)/G.maxScore)}" title="${chipTitle(w)}">${w}</span>`;
 }
 function renderWords(){
-  pweights=personalWeights();
+  pweights=tooltipWeights();
   if(wordsTab==='az'){
     const found=[...G.foundReq].sort();
     els('wordGroups').innerHTML = found.length
@@ -51746,8 +51748,9 @@ function saveProgress(){
   if(!G.ready) return;
   if(G.foundReq.size===0 && G.foundBonus.size===0 && !G.revealed) return;
   const all=loadSaves();
+  const withTs=set=>Object.fromEntries([...set].map(w=>[w, G.foundTs.get(w)||Date.now()]));
   all[G.n+'/'+G.name]={n:G.n, name:G.name, v:GEN_VERSION, ts:Date.now(), total:G.required.size,
-    found:[...G.foundReq], bonus:[...G.foundBonus], revealed:G.revealed,
+    found:withTs(G.foundReq), bonus:withTs(G.foundBonus), revealed:G.revealed,
     ...(G.personal?{personal:true, board:G.board.join('')}:{})};
   try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(e){}
   renderSaves();
@@ -51755,8 +51758,9 @@ function saveProgress(){
 function restoreProgress(){
   const s=loadSaves()[G.n+'/'+G.name];
   if(!s || s.v!==GEN_VERSION) return;
-  for(const w of s.found||[]) if(G.required.has(w)) G.foundReq.add(w);
-  for(const w of s.bonus||[]) if(G.bonus.has(w)) G.foundBonus.add(w);
+  const entries=x=>!x?[]:(Array.isArray(x)?x.map(w=>[w,s.ts]):Object.entries(x));
+  for(const [w,ts] of entries(s.found)) if(G.required.has(w)){ G.foundReq.add(w); G.foundTs.set(w,ts); }
+  for(const [w,ts] of entries(s.bonus)) if(G.bonus.has(w)){ G.foundBonus.add(w); G.foundTs.set(w,ts); }
   G.revealed=!!s.revealed;
 }
 function renderSaves(){
@@ -51767,13 +51771,14 @@ function renderSaves(){
   for(const [key,s] of all){
     const stale=s.v!==GEN_VERSION;
     if(stale) anyStale=true;
-    const done=s.total && s.found.length===s.total;
-    const pct=s.total?Math.round(100*s.found.length/s.total):0;
+    const nf=Array.isArray(s.found)?s.found.length:Object.keys(s.found||{}).length;
+    const done=s.total && nf===s.total;
+    const pct=s.total?Math.round(100*nf/s.total):0;
     const d=new Date(s.ts).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
     html+=`<div class="saveRow${key===curKey?' current':''}${stale?' stale':''}" data-key="${key}">
       <div class="sleft"><div class="sname">${s.personal?s.name.replace(/^personal /,''):s.name}${s.personal?'<span class="vbadge">personal</span>':''}${stale?`<span class="vbadge" title="Played on an older board generator — this board can no longer be regenerated">v${s.v||0}</span>`:''}</div>
       <div class="smeta">${s.n}×${s.n} · ${d}</div></div>
-      <div class="sprog${done?' sdone':''}">${done?'✓ solved':s.found.length+'/'+s.total+' · '+pct+'%'}</div>
+      <div class="sprog${done?' sdone':''}">${done?'✓ solved':nf+'/'+s.total+' · '+pct+'%'}</div>
       <button class="del" title="Delete saved game">✕</button></div>`;
   }
   els('savesList').innerHTML=html;
@@ -51809,12 +51814,26 @@ els('savesList').addEventListener('click',e=>{
    is NOT affected — the penalty only shapes which board gets generated.
    History-dependent, so these boards can't be regenerated from their name:
    saves store the board letters and resume adopts them directly. */
-function personalWeights(){
-  const lastFound=new Map();
-  for(const s of Object.values(loadSaves())){
-    for(const w of [...(s.found||[]),...(s.bonus||[])])
-      if((lastFound.get(w)||0)<s.ts) lastFound.set(w,s.ts);
+/* Per-word found timestamps are stored inside each save (found/bonus are
+   {word: ts} objects; legacy saves with plain arrays are read with the
+   board-level save.ts as an approximation).
+     - generation weights: union over ALL saves, max ts per word
+     - tooltip weights: same union EXCLUDING the current board, so finding a
+       word here doesn't instantly display as a penalty on itself */
+try{ localStorage.removeItem('copia:wordlog'); }catch(e){}   // superseded store
+function lastFoundMap(excludeKey){
+  const m=new Map();
+  for(const [key,s] of Object.entries(loadSaves())){
+    if(key===excludeKey) continue;
+    for(const x of [s.found, s.bonus]){
+      if(!x) continue;
+      const entries = Array.isArray(x) ? x.map(w=>[w, s.ts]) : Object.entries(x);
+      for(const [w,ts] of entries) if((m.get(w)||0)<ts) m.set(w,ts);
+    }
   }
+  return m;
+}
+function weightsFrom(lastFound){
   const now=Date.now(), weights=new Map();
   for(const [w,ts] of lastFound){
     const d=(now-ts)/86400000;
@@ -51824,6 +51843,8 @@ function personalWeights(){
   }
   return weights;
 }
+function personalWeights(){ return weightsFrom(lastFoundMap()); }
+function tooltipWeights(){ return weightsFrom(lastFoundMap(G.n+'/'+G.name)); }
 
 /* ---- new game ---- */
 function finishBoard(board, found, nbr){
@@ -51848,7 +51869,7 @@ function newGame(name){
   G.personal=/^personal /.test(G.name);
   location.hash=G.n+'/'+encodeURIComponent(G.name.replace(/ /g,'-'));
   G.ready=false; G.revealed=false;
-  G.foundReq.clear(); G.foundBonus.clear();
+  G.foundReq.clear(); G.foundBonus.clear(); G.foundTs.clear();
   openLens.clear();
   clearSelection();
   G.board=Array(G.n*G.n).fill('·');
