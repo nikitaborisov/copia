@@ -125,6 +125,7 @@
       </select>
     </label>
     <button id="newBtn" class="primary">New board</button>
+    <button id="personalBtn" title="A board tuned to you: words you've found recently count less during generation, so fresh words fill the grid">Personal board</button>
   </header>
   <main>
     <div id="boardCol">
@@ -51400,8 +51401,8 @@ yurts</script>
    generator, GEN_VERSION) lives in engine.js, shared with tools/. This block
    is only the game state & UI. The dictionary artifact stays embedded in the
    dict-data block above (see build/build_dict.py). */
-const {GEN_VERSION, normalizeName, randomName, findPath, findAllPaths} = CopiaEngine;
-const {wordScore, stemMult, stemExtensions, rarityScore, generateBoard, COMMON, EFF_RANK, STEM_BASES} =
+const {GEN_VERSION, normalizeName, randomName, findPath, findAllPaths, neighborsTable} = CopiaEngine;
+const {wordScore, stemMult, stemExtensions, rarityScore, generateBoard, solve, COMMON, EFF_RANK, STEM_BASES} =
   CopiaEngine.createEngine(document.getElementById('dict-data').textContent);
 
 /* ================= game state & UI ================= */
@@ -51411,7 +51412,7 @@ const grid=els('grid'), gridWrap=els('gridWrap'), overlay=els('genOverlay'),
       linesSvg=els('lines');
 
 const G = {
-  n:4, name:'', board:[], nbr:null,
+  n:4, name:'', personal:false, board:[], nbr:null,
   required:new Set(), bonus:new Set(), stemExt:new Set(),
   foundReq:new Set(), foundBonus:new Set(),
   scores:new Map(), totalScore:0, maxScore:1,
@@ -51738,7 +51739,8 @@ function saveProgress(){
   if(G.foundReq.size===0 && G.foundBonus.size===0 && !G.revealed) return;
   const all=loadSaves();
   all[G.n+'/'+G.name]={n:G.n, name:G.name, v:GEN_VERSION, ts:Date.now(), total:G.required.size,
-    found:[...G.foundReq], bonus:[...G.foundBonus], revealed:G.revealed};
+    found:[...G.foundReq], bonus:[...G.foundBonus], revealed:G.revealed,
+    ...(G.personal?{personal:true, board:G.board.join('')}:{})};
   try{ localStorage.setItem(SAVES_KEY, JSON.stringify(all)); }catch(e){}
   renderSaves();
 }
@@ -51761,7 +51763,7 @@ function renderSaves(){
     const pct=s.total?Math.round(100*s.found.length/s.total):0;
     const d=new Date(s.ts).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
     html+=`<div class="saveRow${key===curKey?' current':''}${stale?' stale':''}" data-key="${key}">
-      <div class="sleft"><div class="sname">${s.name}${stale?`<span class="vbadge" title="Played on an older board generator — this board can no longer be regenerated">v${s.v||0}</span>`:''}</div>
+      <div class="sleft"><div class="sname">${s.personal?s.name.replace(/^personal /,''):s.name}${s.personal?'<span class="vbadge">personal</span>':''}${stale?`<span class="vbadge" title="Played on an older board generator — this board can no longer be regenerated">v${s.v||0}</span>`:''}</div>
       <div class="smeta">${s.n}×${s.n} · ${d}</div></div>
       <div class="sprog${done?' sdone':''}">${done?'✓ solved':s.found.length+'/'+s.total+' · '+pct+'%'}</div>
       <button class="del" title="Delete saved game">✕</button></div>`;
@@ -51791,10 +51793,51 @@ els('savesList').addEventListener('click',e=>{
   newGame(s.name);
 });
 
+/* ---- personal boards ----
+   Words found recently (per saved games in localStorage) weigh less during
+   generation, so the climb prefers boards full of words you haven't seen:
+   penalty 50% if found within a day, exponential decay to 10% at 7 days
+   (p = 0.5 * 5^-((d-1)/6)), ignored past 14 days; weight = 1-p. Play scoring
+   is NOT affected — the penalty only shapes which board gets generated.
+   History-dependent, so these boards can't be regenerated from their name:
+   saves store the board letters and resume adopts them directly. */
+function personalWeights(){
+  const lastFound=new Map();
+  for(const s of Object.values(loadSaves())){
+    for(const w of [...(s.found||[]),...(s.bonus||[])])
+      if((lastFound.get(w)||0)<s.ts) lastFound.set(w,s.ts);
+  }
+  const now=Date.now(), weights=new Map();
+  for(const [w,ts] of lastFound){
+    const d=(now-ts)/86400000;
+    if(d>14) continue;
+    const p = d<=1 ? 0.5 : 0.5*Math.pow(5,-(d-1)/6);
+    weights.set(w, 1-p);
+  }
+  return weights;
+}
+
 /* ---- new game ---- */
+function finishBoard(board, found, nbr){
+  G.board=board; G.nbr=nbr;
+  // words fully zeroed by a stem on this board are not part of the game
+  G.stemExt=stemExtensions(found);
+  G.required=new Set([...found.common].filter(w=>!G.stemExt.has(w)));
+  G.bonus=new Set([...found.bonus].filter(w=>!G.stemExt.has(w)));
+  computeScores();
+  overlay.style.display='none';
+  G.ready=true;
+  restoreProgress();
+  renderGrid();
+  els('boardStats').innerHTML=`<b>“${G.name}”</b>${G.personal?' <span class="vbadge" title="Generated for you: recently-found words were down-weighted">personal</span>':''} · ${G.required.size} words to find · ${G.bonus.size} hidden bonus words`+
+    (G.stemExt.size?` · <span title="0-point extensions of listed words (e.g. plurals) — not counted">${G.stemExt.size} stem extensions excluded</span>`:'');
+  renderWords();
+  renderSaves();
+}
 function newGame(name){
   G.n=+els('sizeSel').value;
   G.name=normalizeName(name||randomName());
+  G.personal=/^personal /.test(G.name);
   location.hash=G.n+'/'+encodeURIComponent(G.name.replace(/ /g,'-'));
   G.ready=false; G.revealed=false;
   G.foundReq.clear(); G.foundBonus.clear();
@@ -51805,25 +51848,25 @@ function newGame(name){
   overlay.style.display='flex';
   genInfo.textContent='';
   document.querySelector('#genOverlay .big').textContent=`Generating “${G.name}”…`;
+  // personal boards resume from stored letters (not regenerable from name)
+  if(G.personal){
+    const s=loadSaves()[G.n+'/'+G.name];
+    if(s && s.v===GEN_VERSION && s.board && s.board.length===G.n*G.n){
+      const nbr=neighborsTable(G.n);
+      const letters=s.board.split('');
+      finishBoard(letters, solve(letters,nbr), nbr);
+      return;
+    }
+  }
   generateBoard(G.n, G.name,
     (words,score,iter,total)=>{ genInfo.textContent=`${words} words · ${Math.round(100*iter/total)}%`; },
-    (board,found,nbr)=>{
-      G.board=board; G.nbr=nbr;
-      // words fully zeroed by a stem on this board are not part of the game
-      G.stemExt=stemExtensions(found);
-      G.required=new Set([...found.common].filter(w=>!G.stemExt.has(w)));
-      G.bonus=new Set([...found.bonus].filter(w=>!G.stemExt.has(w)));
-      computeScores();
-      overlay.style.display='none';
-      G.ready=true;
-      restoreProgress();
-      renderGrid();
-      els('boardStats').innerHTML=`<b>“${G.name}”</b> · ${G.required.size} words to find · ${G.bonus.size} hidden bonus words`+
-        (G.stemExt.size?` · <span title="0-point extensions of listed words (e.g. plurals) — not counted">${G.stemExt.size} stem extensions excluded</span>`:'');
-      renderWords();
-      renderSaves();
-    });
+    finishBoard,
+    G.personal ? personalWeights() : null);
 }
+els('personalBtn').addEventListener('click',e=>{
+  e.currentTarget.blur();
+  newGame('personal '+randomName());
+});
 function parseHash(){
   const m=location.hash.match(/^#([345])\/(.+)$/);
   if(!m) return null;

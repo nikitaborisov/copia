@@ -227,9 +227,16 @@ function createEngine(dictText){
     if(bases) for(const [b,mm] of bases){ if(mm<m && present.has(b)) m=mm; }
     return m;
   }
-  function scoreOf(found){
+  /* `weights` (optional Map word->multiplier, default 1) supports personal
+     boards: recently-found words weigh less so generation favors fresh words.
+     With weights null/absent the math is byte-identical to before — normal
+     named boards are unaffected (no GEN_VERSION impact). Weighted boards are
+     NOT reproducible from their name (history changes), so their saves store
+     the board letters. */
+  function scoreOf(found, weights){
     let s=0;
-    for(const w of found.common) s += wordScore(w)*stemMult(w, found.common);
+    for(const w of found.common)
+      s += wordScore(w)*stemMult(w, found.common)*(weights ? (weights.get(w)??1) : 1);
     return s;
   }
   /* Words whose score is fully zeroed on this board (a stem base is present
@@ -289,8 +296,8 @@ function createEngine(dictText){
   /* Full climb objective: word scores x evenness pressure x word-count
      pressure (multi-objective; see SCORING comment). With both exponents 0
      this is exactly scoreOf. */
-  function climbScore(found){
-    let s = scoreOf(found);
+  function climbScore(found, weights){
+    let s = scoreOf(found, weights);
     if(SCORING.EVENNESS_EXP) s *= Math.pow(evenness(found.through), SCORING.EVENNESS_EXP);
     if(SCORING.WORDCOUNT_EXP) s *= Math.pow(found.common.size, SCORING.WORDCOUNT_EXP);
     return s;
@@ -324,13 +331,13 @@ function createEngine(dictText){
      mutate-solve-compare iteration. Both generateBoardSync (Node tools) and
      generateBoard (chunked, browser) drive this same loop, so the two paths
      cannot diverge. */
-  function startClimb(n, name){
+  function startClimb(n, name, weights){
     const rng = mulberry32(hashStr(n+'x'+n+':'+normalizeName(name)));
     const nbr = neighborsTable(n);
     const g = {nbr, total:GEN_ITERS[n], iter:0};
     g.board = seedBoard(n, rng);
     g.best = solve(g.board, nbr);
-    g.bestScore = climbScore(g.best);
+    g.bestScore = climbScore(g.best, weights);
     g.step = ()=>{
       g.iter++;
       const trial = g.board.slice();
@@ -341,7 +348,7 @@ function createEngine(dictText){
         [trial[a],trial[b]]=[trial[b],trial[a]];
       }
       const res = solve(trial,nbr);
-      const sc = climbScore(res);
+      const sc = climbScore(res, weights);
       if(sc>=g.bestScore){
         g.board=trial; g.best=res; g.bestScore=sc;
       }
@@ -349,14 +356,14 @@ function createEngine(dictText){
     return g;
   }
   // blocking; returns {board, best, bestScore, nbr}
-  function generateBoardSync(n, name){
-    const g = startClimb(n, name);
+  function generateBoardSync(n, name, weights){
+    const g = startClimb(n, name, weights);
     while(g.iter<g.total) g.step();
     return g;
   }
   // cooperative: ~40ms chunks between progress callbacks, keeps the UI alive
-  function generateBoard(n, name, onProgress, onDone){
-    const g = startClimb(n, name);
+  function generateBoard(n, name, onProgress, onDone, weights){
+    const g = startClimb(n, name, weights);
     function chunk(){
       const stop = performance.now()+40;
       while(g.iter<g.total && performance.now()<stop) g.step();
